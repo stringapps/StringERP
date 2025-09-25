@@ -1,0 +1,9 @@
+
+
+GET http://127.0.0.1:8014/api/method/stringerp.v1.api.hello_world
+Accept: 'application/json'
+Content-Type: 'application/json'
+
+{
+    "hello": "ChatGPT"
+}
