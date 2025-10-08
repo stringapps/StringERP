@@ -1,67 +1,93 @@
 import frappe
 from frappe import _
 
-@frappe.whitelist(allow_guest=True)
-def hello_world(hello):
-    frappe.local.response["home_page"] = f"Hello, {hello}!"
+
+import frappe
+from frappe import _
+from frappe.utils import flt
 
 
 @frappe.whitelist(allow_guest=True)
-def create_or_update_sales_invoice(invoice_data):
+def create_siv(**kwargs):
+    try:
+        # If API sends JSON body as string, ensure it's parsed
+        if isinstance(kwargs, str):
+            kwargs = frappe.parse_json(kwargs)
+        elif isinstance(kwargs.get("data"), str):
+            kwargs = frappe.parse_json(kwargs.get("data"))
 
-    # try:
-        # mapped_data = map_external_to_sales_invoice(invoice_data)
-        # data = frappe.parse_json(mapped_data)
-        # data = mapped_data
+        mapped_data = map_external_to_sales_invoice(kwargs)
 
-        # if data.get("name") and frappe.db.exists("Sales Invoice", data["name"]):
-        #     doc = frappe.get_doc("Sales Invoice", data["name"])
-        #     doc.update(data)
-        #     doc.save()
-        #     return {"status": "updated", "invoice": doc.name}
+        if not mapped_data.get("customer"):
+            frappe.throw(_("Customer code is missing"))
 
-        # doc = frappe.new_doc("Sales Invoice")
-        # doc.update(data)
-        # doc.insert(ignore_permissions=True)
-        return {"status": "created"}
+        # Update existing invoice if same customer_order_no exists
+        existing_invoice = frappe.db.exists("Sales Invoice", {"customer_order_no": mapped_data.get("customer_order_no")})
 
-    # except Exception as e:
-    #     pass
-        # frappe.log_error(message=frappe.get_traceback(), title="Invoice Sync Failed")
-        # frappe.throw(_("Invoice creation/update failed: {0}").format(str(e)))
+        if existing_invoice:
+            doc = frappe.get_doc("Sales Invoice", existing_invoice)
+            doc.update(mapped_data)
+            doc.save()
+            return {"status": "updated", "invoice": doc.name}
+
+        # Create new Sales Invoice
+        doc = frappe.new_doc("Sales Invoice")
+        doc.update(mapped_data)
+        doc.insert(ignore_permissions=True)
+
+        # Handle payment entries if is_paid or payments exist
+        # if mapped_data.get("is_paid") or kwargs.get("payments"):
+        #     for pay in kwargs.get("payments", []):
+        #         mode_of_payment = pay.get("CARDTYPE", "Cash")
+        #         amount = flt(pay.get("AMOUNT", 0))
+        #         reference_no = pay.get("CARDNO", "")
+        #         doc.append("payments", {
+        #             "mode_of_payment": mode_of_payment,
+        #             "amount": amount,
+        #             "reference_no": reference_no
+        #         })
+
+        doc.save()
+
+        return {"status": "created", "invoice": kwargs}
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
+        frappe.throw(_("Invoice creation/update failed: {0}").format(str(e)))
+
 
 def map_external_to_sales_invoice(external_data):
+    """Map incoming external POS data to ERPNext Sales Invoice format"""
+
     mapped = {
         "customer": external_data.get("customercode"),
-        "customer_name": external_data.get("firstName"),
-        "posting_date": external_data.get("billDate", "")[:10],  
-        "due_date": external_data.get("billDate", "")[:10],     
+        "customer_name": external_data.get("firstName") or "",
+        "posting_date": external_data.get("billDate", "")[:10],
+        "due_date": external_data.get("billDate", "")[:10],
         "remarks": external_data.get("Remarks"),
-        "items": [
-            {
-                "item_code": item.get("barcode"),
-                "qty": item.get("quantity"),
-                "rate": float(item.get("UnitPrice", 0)),
-                "discount_percentage": float(item.get("UnitDisc", 0)),
-                "description": item.get("DiscTID"),
-            }
-            for item in external_data.get("items", [])
-        ],
-        "total": external_data.get("subtotal"),
-        "discount_amount": external_data.get("SubTotalDiscount"),
-        "net_total": external_data.get("nettotal"),
-        "taxes_and_charges": external_data.get("VATAmount"),
-        "grand_total": external_data.get("nettotalwithVAT"),
-        "is_paid": bool(external_data.get("ispaid")),
         "customer_order_no": external_data.get("customerOrdernumber"),
-        "payments": [
-            {
-                "mode_of_payment": payment.get("CARDTYPE", "Cash"),
-                "amount": payment.get("AMOUNT", 0),
-                "reference_no": payment.get("CARDNO", ""),
-                "pos_paycode": payment.get("POS_PAYCODE", None)
-            }
-            for payment in external_data.get("payments", [])
-        ] if external_data.get("payments") else [],
+        "items": [],
+        # "is_pos": 1,
+        "is_return": 0,
+        "set_posting_time": 1,
+        "docstatus": 1 if external_data.get("ispaid") else 0,
+        "is_paid": bool(external_data.get("ispaid")),
+        "net_total": flt(external_data.get("nettotal", 0)),
+        "discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
+        "taxes_and_charges": None,
+        "other_charges_calculation": flt(external_data.get("VATAmount", 0)),
+        "grand_total": flt(external_data.get("nettotalwithVAT", 0)),
+        "total": flt(external_data.get("subtotal", 0))
     }
+
+    # Items mapping
+    for item in external_data.get("items", []):
+        mapped["items"].append({
+            "item_code": item.get("barcode"),
+            "qty": flt(item.get("quantity", 1)),
+            "rate": flt(item.get("UnitPrice", 0)),
+            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "description": item.get("DiscTID")
+        })
+
     return mapped
