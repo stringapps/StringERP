@@ -245,3 +245,45 @@ app_license = "agpl-3.0"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
+fixtures = [
+    {
+        "doctype": "Custom Field",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "Sales Invoice-custom_walkin_customer_address",
+                    "Sales Invoice-custom_column_break_u2ryo",
+                    "Sales Invoice-custom_walkin_customer_phone",
+                    "Sales Invoice-custom_walkin_customer_name",
+                    "Sales Invoice-custom_walkin_customer_details",
+                    "Sales Invoice-custom_order_remarks",
+                    "Sales Invoice-custom_column_break_mba9s",
+                    "Sales Invoice-custom_online_order_id",
+                    "Sales Invoice-custom_no_of_pax",
+                    "Sales Invoice-custom_table",
+                    "Sales Invoice-custom_column_break_1iel6",
+                    "Sales Invoice-custom_delivery_man",
+                    "Sales Invoice-custom_guid",
+                    "Sales Invoice-custom_bill_type",
+                    "Sales Invoice-custom_section_break_bhjug"
+                ],
+            ],
+        ],
+       
+    },
+    {
+     "doctype": "Property Setter",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+				"Sales Invoice-main-field_order",
+               
+                ],
+            ],
+        ],
+    }
+]

@@ -14,7 +14,7 @@ Content-Type: application/json
 
 
 ### Test Create SIV API (POST)
-POST http://127.0.0.1:8012/api/method/stringerp.v1.api.create_siv
+POST http://127.0.0.1:8014/api/method/stringerp.v1.api.create_siv
 Content-Type: application/json
 
 {
@@ -24,7 +24,7 @@ Content-Type: application/json
   "guid": "68360e8c1f251",
   "salesmancode": "800",
   "deliverymancode": null,
-  "customercode": "AE-CUST-25-26-01267",
+  "customercode": "EMP00011",
   "salestype": "OT",
   "subtotal": 7.1,
   "SubTotalDiscount": 0,
@@ -40,21 +40,21 @@ Content-Type: application/json
   "Reupload": 0,
   "items": [
     {
-      "barcode": "Expenses",
+      "barcode": "0001",
       "quantity": 1,
       "UnitPrice": "1.90000",
       "UnitDisc": "0.00000",
       "DiscTID": "DINEIN SECTION"
     },
     {
-      "barcode": "Expenses",
+      "barcode": "0001",
       "quantity": 1,
       "UnitPrice": "2.50000",
       "UnitDisc": "0.00000",
       "DiscTID": "DINEIN SECTION"
     },
     {
-      "barcode": "Expenses",
+      "barcode": "0001",
       "quantity": 1,
       "UnitPrice": "2.70000",
       "UnitDisc": "0.00000",
@@ -64,7 +64,7 @@ Content-Type: application/json
   "payments": [
     {
       "POS_PAYCODE": 2,
-      "CARDTYPE": "CARD",
+      "CARDTYPE": "Cash",
       "CARDNO": "",
       "AMOUNT": 7.81
     }

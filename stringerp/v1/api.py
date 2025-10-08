@@ -1,6 +1,3 @@
-import frappe
-from frappe import _
-
 
 import frappe
 from frappe import _
@@ -33,23 +30,21 @@ def create_siv(**kwargs):
         # Create new Sales Invoice
         doc = frappe.new_doc("Sales Invoice")
         doc.update(mapped_data)
+        
+        # Handle payment entries if is_paid or payments exist
+        if mapped_data.get("is_paid") or kwargs.get("payments"):
+            for pay in kwargs.get("payments", []):
+                mode_of_payment = pay.get("CARDTYPE", "Cash")
+                amount = flt(pay.get("AMOUNT", 0))
+                reference_no = pay.get("CARDNO", "")
+                doc.append("payments", {
+                    "mode_of_payment": mode_of_payment,
+                    "amount": amount,
+                    "reference_no": reference_no
+                })
         doc.insert(ignore_permissions=True)
 
-        # Handle payment entries if is_paid or payments exist
-        # if mapped_data.get("is_paid") or kwargs.get("payments"):
-        #     for pay in kwargs.get("payments", []):
-        #         mode_of_payment = pay.get("CARDTYPE", "Cash")
-        #         amount = flt(pay.get("AMOUNT", 0))
-        #         reference_no = pay.get("CARDNO", "")
-        #         doc.append("payments", {
-        #             "mode_of_payment": mode_of_payment,
-        #             "amount": amount,
-        #             "reference_no": reference_no
-        #         })
-
-        doc.save()
-
-        return {"status": "created", "invoice": kwargs}
+        return {"status": "created", "invoice": doc.name}
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
@@ -67,10 +62,9 @@ def map_external_to_sales_invoice(external_data):
         "remarks": external_data.get("Remarks"),
         "customer_order_no": external_data.get("customerOrdernumber"),
         "items": [],
-        # "is_pos": 1,
+        "is_pos": 1,
         "is_return": 0,
         "set_posting_time": 1,
-        "docstatus": 1 if external_data.get("ispaid") else 0,
         "is_paid": bool(external_data.get("ispaid")),
         "net_total": flt(external_data.get("nettotal", 0)),
         "discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
