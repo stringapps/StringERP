@@ -267,7 +267,10 @@ fixtures = [
                     "Sales Invoice-custom_delivery_man",
                     "Sales Invoice-custom_guid",
                     "Sales Invoice-custom_bill_type",
-                    "Sales Invoice-custom_section_break_bhjug"
+                    "Sales Invoice-custom_section_break_bhjug",
+                    "Sales Invoice Item-custom_discount_type",
+                    "Sales Invoice Item-custom_bom_item",
+                    "Item-custom_bom_item"
                 ],
             ],
         ],

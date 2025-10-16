@@ -1,7 +1,7 @@
 {
  "app": "frappe",
  "charts": [],
- "content": "[{\"id\":\"nZb06_sFaE\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">String ERP</span>\",\"col\":12}}]",
+ "content": "[{\"id\":\"nZb06_sFaE\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">String ERP</span>\",\"col\":12}},{\"id\":\"6TR8bTNrfi\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Walk-in Customer\",\"col\":3}},{\"id\":\"i4qq9soIA5\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"String Settings\",\"col\":3}},{\"id\":\"I7ZIs9G9fv\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Sales Invoice\",\"col\":3}},{\"id\":\"wWknLr4ybn\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Invoice Closing\",\"col\":3}}]",
  "creation": "2025-09-25 16:10:59.382509",
  "custom_blocks": [],
  "docstatus": 0,
@@ -15,7 +15,7 @@
  "label": "String ERP",
  "link_type": "DocType",
  "links": [],
- "modified": "2025-09-25 16:12:05.022697",
+ "modified": "2025-10-08 16:27:19.254274",
  "modified_by": "Administrator",
  "module": "StringERP",
  "name": "String ERP",
@@ -26,7 +26,39 @@
  "quick_lists": [],
  "roles": [],
  "sequence_id": 23.0,
- "shortcuts": [],
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Walk-in Customer",
+   "link_to": "Walk-in Customer",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Sales Invoice",
+   "link_to": "Sales Invoice",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "String Settings",
+   "link_to": "String Settings",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Invoice Closing",
+   "link_to": "Invoice Closing",
+   "stats_filter": "[]",
+   "type": "DocType"
+  }
+ ],
  "title": "String ERP",
  "type": "Workspace"
 }

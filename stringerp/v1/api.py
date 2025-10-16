@@ -19,7 +19,8 @@ def create_siv(**kwargs):
             frappe.throw(_("Customer code is missing"))
 
         # Update existing invoice if same customer_order_no exists
-        existing_invoice = frappe.db.exists("Sales Invoice", {"customer_order_no": mapped_data.get("customer_order_no")})
+        existing_invoice = frappe.db.exists(
+            "Sales Invoice", {"customer_order_no": mapped_data.get("customer_order_no")})
 
         if existing_invoice:
             doc = frappe.get_doc("Sales Invoice", existing_invoice)
@@ -30,7 +31,7 @@ def create_siv(**kwargs):
         # Create new Sales Invoice
         doc = frappe.new_doc("Sales Invoice")
         doc.update(mapped_data)
-        
+
         # Handle payment entries if is_paid or payments exist
         if mapped_data.get("is_paid") or kwargs.get("payments"):
             for pay in kwargs.get("payments", []):
@@ -44,7 +45,7 @@ def create_siv(**kwargs):
                 })
         doc.insert(ignore_permissions=True)
 
-        return {"status": "created", "invoice": doc.name}
+        return {"status": "created", "invoice": doc}
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
@@ -85,3 +86,60 @@ def map_external_to_sales_invoice(external_data):
         })
 
     return mapped
+
+
+@frappe.whitelist(allow_guest=False)
+def get_customer_details(customer_id):
+    """
+    API Endpoint to fetch customer details with proper error handling.
+    Example URL: /api/method/my_app.api.custom_api.get_customer_details?customer_id=CUST-0001
+    """
+
+    try:
+        # ✅ Validate input
+        if not customer_id:
+            frappe.local.response.http_status_code = 400
+            return {"status": "error", "message": _("Missing required parameter: customer_id")}
+
+        # ✅ Check if customer exists
+        customer = frappe.get_doc("Customer", customer_id)
+        if not customer:
+            frappe.local.response.http_status_code = 404
+            return {"status": "error", "message": _("Customer not found")}
+
+        # ✅ Return formatted data
+        data = {
+            "name": customer.name,
+            "customer_name": customer.customer_name,
+            "customer_group": customer.customer_group,
+            "territory": customer.territory,
+            "mobile_no": customer.mobile_no,
+            "email_id": customer.email_id
+        }
+
+        return {
+            "status": "success",
+            "message": _("Customer fetched successfully"),
+            "data": data
+        }
+
+    except frappe.DoesNotExistError:
+        frappe.local.response.http_status_code = 404
+        return {"status": "error", "message": _("Customer not found")}
+
+    except frappe.PermissionError:
+        frappe.local.response.http_status_code = 403
+        return {"status": "error", "message": _("You do not have permission to access this resource.")}
+
+    except Exception as e:
+        # ✅ Log the error for debugging
+        frappe.log_error(message=frappe.get_traceback(),
+                         title="API Error: get_customer_details")
+
+        # ✅ Return safe error response
+        frappe.local.response.http_status_code = 500
+        return {
+            "status": "error",
+            "message": _("An unexpected error occurred. Please contact support."),
+            "error": str(e) if frappe.conf.developer_mode else None
+        }
