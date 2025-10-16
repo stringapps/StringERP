@@ -31,18 +31,6 @@ def create_siv(**kwargs):
         # Create new Sales Invoice
         doc = frappe.new_doc("Sales Invoice")
         doc.update(mapped_data)
-
-        # Handle payment entries if is_paid or payments exist
-        if mapped_data.get("is_paid") or kwargs.get("payments"):
-            for pay in kwargs.get("payments", []):
-                mode_of_payment = pay.get("CARDTYPE", "Cash")
-                amount = flt(pay.get("AMOUNT", 0))
-                reference_no = pay.get("CARDNO", "")
-                doc.append("payments", {
-                    "mode_of_payment": mode_of_payment,
-                    "amount": amount,
-                    "reference_no": reference_no
-                })
         doc.insert(ignore_permissions=True)
 
         return {"status": "created", "invoice": doc}
@@ -84,6 +72,18 @@ def map_external_to_sales_invoice(external_data):
             "discount_percentage": flt(item.get("UnitDisc", 0)),
             "description": item.get("DiscTID")
         })
+
+    # Handle payment entries if is_paid or payments exist
+    if external_data.get("is_paid") or external_data.get("payments"):
+        for pay in external_data.get("payments", []):
+            mode_of_payment = pay.get("CARDTYPE", "Cash")
+            amount = flt(pay.get("AMOUNT", 0))
+            reference_no = pay.get("CARDNO", "")
+            mapped["payments"].append({
+                "mode_of_payment": mode_of_payment,
+                "amount": amount,
+                "reference_no": reference_no
+            })
 
     return mapped
 

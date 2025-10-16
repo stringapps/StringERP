@@ -9,6 +9,7 @@
   "section_break_wa6l",
   "amended_from",
   "pos_profile",
+  "warehouse",
   "column_break_xssz",
   "date",
   "time",
@@ -46,11 +47,13 @@
    "fieldtype": "Column Break"
   },
   {
+   "default": "Today",
    "fieldname": "date",
    "fieldtype": "Date",
    "label": "Date"
   },
   {
+   "default": "Now",
    "fieldname": "time",
    "fieldtype": "Time",
    "label": "Time"
@@ -89,13 +92,20 @@
    "fieldtype": "Table",
    "label": "RAW Materials",
    "options": "Invoice Closing RAW"
+  },
+  {
+   "fetch_from": "pos_profile.warehouse",
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Warehouse",
+   "options": "Warehouse"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-10-16 13:14:49.062022",
+ "modified": "2025-10-16 15:17:39.199937",
  "modified_by": "Administrator",
  "module": "StringERP",
  "name": "Invoice Closing",

@@ -35,7 +35,8 @@ frappe.ui.form.on("Invoice Closing", {
                         frm.add_child("invoices", {
                             invoice_no: d.name,
                             date: d.posting_date,
-                            amount: d.grand_total
+                            amount: d.grand_total,
+                            bill_type: d.custom_bill_type
                         });
                     });
                     let bom_items = r.message.bom_items;

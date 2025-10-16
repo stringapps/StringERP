@@ -27,7 +27,8 @@ def get_siv(pos_profile):
             "name",
             "customer",
             "posting_date",
-            "grand_total"
+            "grand_total",
+            "custom_bill_type"
         ],
         order_by="posting_date desc"
     )
@@ -50,11 +51,16 @@ def get_bom_items(invoices):
         # Fetch BOM for each item
         for item in items:
             bom = frappe.db.get_value(
-                "BOM", {"item": item.item_code, "is_active": 1}, "name")
+                "BOM", {
+                    "item": item.item_code,
+                    "is_active": 1,
+                    "custom_bill_type": inv.custom_bill_type if inv.custom_bill_type else None
+                }, "name")
             item["bom"] = bom
         bom_items.extend(items)
 
     return bom_items
+
 
 # ============================================================
 
@@ -190,3 +196,34 @@ def cancel_and_amend_sales_invoice(invoice_name):
         frappe.log_error(frappe.get_traceback(),
                          "cancel_and_amend_sales_invoice_error")
         return {"status": "error", "message": str(e)}
+
+
+
+@frappe.whitelist()
+def create_sales_invoice():
+    # Create a new Sales Invoice
+	for i in range(200):  # Change range for multiple invoices
+		inv = frappe.new_doc("Sales Invoice")
+
+		# Basic info
+		inv.customer = "Walk In Customer"
+		inv.is_pos = 1
+		inv.pos_profile = "Eby Mathew"
+		inv.posting_date = frappe.utils.nowdate()
+		inv.due_date = frappe.utils.nowdate()
+
+		# Add one dummy item
+		inv.append("items", {
+			"item_code": "0002",
+			"qty": 1,
+			"rate": 100
+		})
+		inv.append("items", {
+			"item_code": "0001",
+			"qty": 1,
+			"rate": 100
+		})
+
+		# Save and submit
+		inv.insert(ignore_permissions=True)
+    # inv.submit()

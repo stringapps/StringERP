@@ -8,7 +8,9 @@
  "field_order": [
   "invoice_no",
   "date",
-  "amount"
+  "column_break_etgj",
+  "amount",
+  "bill_type"
  ],
  "fields": [
   {
@@ -33,13 +35,25 @@
    "in_list_view": 1,
    "in_preview": 1,
    "label": "Amount"
+  },
+  {
+   "fieldname": "column_break_etgj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "bill_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_preview": 1,
+   "label": "Bill Type",
+   "options": "\nTake Away\nHome Delivery\nDine In\nPre Order\nOnline\nStaff Order\nOthers"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-10-08 15:30:35.055209",
+ "modified": "2025-10-16 15:24:58.414119",
  "modified_by": "Administrator",
  "module": "StringERP",
  "name": "Invoice Closing Table",
