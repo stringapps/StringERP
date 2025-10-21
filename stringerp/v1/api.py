@@ -2,7 +2,7 @@
 import frappe
 from frappe import _
 from frappe.utils import flt
-
+from stringerp.v1.utils import api_log
 
 @frappe.whitelist(allow_guest=True)
 def create_siv(**kwargs):
@@ -33,12 +33,15 @@ def create_siv(**kwargs):
         doc.update(mapped_data)
         doc.insert(ignore_permissions=True)
 
-        return {"status": "created", "invoice": doc}
+        response = {"status": "success", "invoice": doc}
+        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
+        return response
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
-        frappe.throw(_("Invoice creation/update failed: {0}").format(str(e)))
-
+        response = {"status": "error", "message": str(e)}
+        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Failed")
+        return response
 
 def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
@@ -51,6 +54,7 @@ def map_external_to_sales_invoice(external_data):
         "remarks": external_data.get("Remarks"),
         "customer_order_no": external_data.get("customerOrdernumber"),
         "items": [],
+        "payments": [],
         "is_pos": 1,
         "is_return": 0,
         "set_posting_time": 1,
@@ -60,11 +64,25 @@ def map_external_to_sales_invoice(external_data):
         "taxes_and_charges": None,
         "other_charges_calculation": flt(external_data.get("VATAmount", 0)),
         "grand_total": flt(external_data.get("nettotalwithVAT", 0)),
-        "total": flt(external_data.get("subtotal", 0))
+        "total": flt(external_data.get("subtotal", 0)),
+        "custom_walkin_customer_alt_phone": external_data.get("altPhone") or "",
+        "custom_walkin_customer_phone": external_data.get("phoneNumber") or "",
+        "custom_walkin_customer_address": external_data.get("address1") or "",
+        "custom_delivery_man": external_data.get("deliverymancode") or "",
+        "pos_profile": external_data.get("posProfile") or "",
     }
 
     # Items mapping
     for item in external_data.get("items", []):
+        mapped["items"].append({
+            "item_code": item.get("barcode"),
+            "qty": flt(item.get("quantity", 1)),
+            "rate": flt(item.get("UnitPrice", 0)),
+            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "description": item.get("DiscTID")
+        })
+
+    for item in external_data.get("deliveryCharges", []):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
