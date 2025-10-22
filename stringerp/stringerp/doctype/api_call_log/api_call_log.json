@@ -45,7 +45,7 @@
    "in_preview": 1,
    "in_standard_filter": 1,
    "label": "Response status",
-   "options": "\nSuccess\nFaild"
+   "options": "\nSuccess\nFailed"
   },
   {
    "fieldname": "section_break_irie",
@@ -78,7 +78,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-08 16:42:38.369322",
+ "modified": "2025-10-22 00:47:47.032229",
  "modified_by": "Administrator",
  "module": "StringERP",
  "name": "API Call Log",

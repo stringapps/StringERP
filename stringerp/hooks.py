@@ -271,7 +271,8 @@ fixtures = [
                     "Sales Invoice Item-custom_discount_type",
                     "Sales Invoice Item-custom_bom_item",
                     "Item-custom_bom_item",
-                    "BOM-custom_bill_type"
+                    "BOM-custom_bill_type",
+                    "Sales Invoice-custom_walkin_customer_alt_phone"
                 ],
             ],
         ],
