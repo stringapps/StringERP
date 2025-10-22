@@ -2,7 +2,7 @@
 import frappe
 from frappe import _
 from frappe.utils import flt
-from stringerp.v1.utils import api_log
+from stringerp.v1.utils import api_log, bill_type_map
 
 @frappe.whitelist(allow_guest=True)
 def create_siv(**kwargs):
@@ -12,6 +12,9 @@ def create_siv(**kwargs):
             kwargs = frappe.parse_json(kwargs)
         elif isinstance(kwargs.get("data"), str):
             kwargs = frappe.parse_json(kwargs.get("data"))
+        
+        if not frappe.db.exists("Customer", kwargs.get("firstName")):
+            raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
 
         mapped_data = map_external_to_sales_invoice(kwargs)
 
@@ -40,15 +43,15 @@ def create_siv(**kwargs):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
         response = {"status": "error", "message": str(e)}
-        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Failed")
+        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Failed", error=e)
         return response
 
 def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
 
     mapped = {
-        "customer": external_data.get("customercode"),
-        "customer_name": external_data.get("firstName") or "",
+        "customer": external_data.get("firstName"),
+        # "customer_name": external_data.get("firstName") or "",
         "posting_date": external_data.get("billDate", "")[:10],
         "due_date": external_data.get("billDate", "")[:10],
         "remarks": external_data.get("Remarks"),
@@ -70,6 +73,10 @@ def map_external_to_sales_invoice(external_data):
         "custom_walkin_customer_address": external_data.get("address1") or "",
         "custom_delivery_man": external_data.get("deliverymancode") or "",
         "pos_profile": external_data.get("posProfile") or "",
+        "custom_bill_type": bill_type_map.get(external_data.get("salestype")) or "",
+        "custom_guid": external_data.get("guid") or "",
+        "custom_no_of_pax": external_data.get("noOfPax"),
+        "custom_order_remarks": external_data.get("Remarks")
     }
 
     # Items mapping
