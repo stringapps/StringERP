@@ -11,3 +11,11 @@ def api_log(**kwargs):
     doc.time = frappe.utils.now()
     doc.response_status = kwargs.get("status")
     doc.insert(ignore_permissions=True)
+
+bill_type_map = {
+    "DI": "Dine In",
+    "HD": "Home Delivery",
+    "TK": "Take Away",
+    "ON": "Online",
+    "OT": "Others"
+}
