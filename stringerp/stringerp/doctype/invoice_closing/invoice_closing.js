@@ -3,21 +3,30 @@
 
 frappe.ui.form.on("Invoice Closing", {
     refresh(frm) {
-        frm.add_custom_button(__('Create Stock Entry from BOM'), function () {
-            frappe.call({
-                method: "stringerp.stringerp.doctype.invoice_closing.invoice_closing.make_stock_entry_from_bom",
-                args: {
-                    bom_no: "BOM-0002-001",
-                    purpose: "Manufacture",
-                    qty: 4,
-                    target_warehouse: "Finished Goods - DSNK",
-                    auto_submit: 0
-                },
-                callback: function (r) {
-                    frappe.msgprint(r.message);
-                }
+        if(frm.doc.docstatus == 0 & frm.doc.status == "Draft"){
+            frm.add_custom_button(__('Create Stock Entry from BOM'), function () {
+                frappe.call({
+                    method: "stringerp.stringerp.doctype.invoice_closing.invoice_closing.make_stock_entry_from_bom",
+                    args: {
+                        invoice_closing: frm.doc.name,
+                        purpose: "Manufacture",
+                        target_warehouse: frm.doc.warehouse
+                    },
+                    callback: function (r) {
+                        frappe.msgprint(r.message);
+                    }
+                });
             });
-        });
+        }else if(frm.doc.docstatus == 1 & frm.doc.status == "Stock Entry Submitted"){
+            frm.add_custom_button(__('Submit Invoice'), function () {
+                frappe.call({
+                    method: "submit_invoice",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: "Submitting Invoice",
+                });
+            });
+        }   
     },
     pos_profile(frm) {
         if (frm.doc.pos_profile) {
@@ -52,6 +61,22 @@ frappe.ui.form.on("Invoice Closing", {
                     frm.refresh_field("invoices");
                 }
             });
+        }
+    },
+    after_save(frm){
+        if(frm.doc.docstatus == 0){
+            frappe.call({
+                method: "validate_raw_materials",
+                doc:frm.doc,
+                freeze: true,
+                freeze_message: "Validating Raw Materials",
+                callback: function (r) {
+                    if (!r.exc) {
+                        frm.save();
+                        frm.refresh();
+                    }
+                },
+            })
         }
     }
 });
