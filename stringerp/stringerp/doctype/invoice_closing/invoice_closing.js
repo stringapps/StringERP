@@ -26,6 +26,15 @@ frappe.ui.form.on("Invoice Closing", {
                     freeze_message: "Submitting Invoice",
                 });
             });
+        }else if(frm.doc.docstatus == 1 & frm.doc.status == "Invoice Submitted"){
+            frm.add_custom_button(__('Cancel Invoice'), function () {
+                frappe.call({
+                    method: "cancel_invoice",
+                    doc: frm.doc,
+                    freeze: true,
+                    freeze_message: "Cancelling Invoice"
+                });
+            });
         }   
     },
     pos_profile(frm) {
@@ -78,5 +87,5 @@ frappe.ui.form.on("Invoice Closing", {
                 },
             })
         }
-    }
+    },
 });

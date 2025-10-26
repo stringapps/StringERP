@@ -31,6 +31,7 @@ class InvoiceClosing(Document):
                 "qty": raw_material_summary[item],
                 "stock_qty": get_stock_balance(item, warehouse)
             })
+        self.save(ignore_permissions = True)
 
     def on_submit(self):
         self.submit_stock_entry()
@@ -46,6 +47,14 @@ class InvoiceClosing(Document):
             except Exception as e:
                 frappe.throw(str(e))
 
+    @frappe.whitelist()    
+    def cancel_invoice(self):
+        for inv in self.invoices:
+            cancel_and_amend_sales_invoice(inv.invoice_no)
+        frappe.msgprint(_("Invoices cancelled"))
+        self.status = "Invoice Cancelled"
+        self.save(ignore_permissions = True)
+            
     @frappe.whitelist()
     def submit_invoice(self):
         for inv in self.invoices:
