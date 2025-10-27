@@ -7,19 +7,21 @@
  "engine": "InnoDB",
  "field_order": [
   "section_break_wa6l",
-  "amended_from",
   "pos_profile",
   "warehouse",
+  "status",
   "column_break_xssz",
   "date",
   "time",
+  "amended_from",
   "section_break_wavu",
   "invoices",
   "total_amount",
   "section_break_gdip",
   "bom_items",
   "section_break_zpex",
-  "raw_materials"
+  "raw_materials",
+  "connections_tab"
  ],
  "fields": [
   {
@@ -39,8 +41,11 @@
   {
    "fieldname": "pos_profile",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "POS Profile",
-   "options": "POS Profile"
+   "no_copy": 1,
+   "options": "POS Profile",
+   "reqd": 1
   },
   {
    "fieldname": "column_break_xssz",
@@ -66,7 +71,8 @@
    "fieldname": "invoices",
    "fieldtype": "Table",
    "label": "Invoices",
-   "options": "Invoice Closing Table"
+   "options": "Invoice Closing Table",
+   "reqd": 1
   },
   {
    "fieldname": "total_amount",
@@ -99,13 +105,27 @@
    "fieldtype": "Link",
    "label": "Warehouse",
    "options": "Warehouse"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Draft\nStock Entry Created\nStock Entry Submitted\nInvoice Submitted\nInvoice Cancelled\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "connections_tab",
+   "fieldtype": "Tab Break",
+   "label": "Connections",
+   "show_dashboard": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-10-16 15:17:39.199937",
+ "modified": "2025-10-26 12:21:43.722129",
  "modified_by": "Administrator",
  "module": "StringERP",
  "name": "Invoice Closing",
