@@ -3,7 +3,7 @@
 
 frappe.ui.form.on("Invoice Closing", {
     refresh(frm) {
-        if(frm.doc.docstatus == 0 & frm.doc.status == "Draft"){
+        if(frm.doc.docstatus == 0 & frm.doc.status == "Draft" & !frm.is_new()){
             frm.add_custom_button(__('Create Stock Entry from BOM'), function () {
                 frappe.call({
                     method: "stringerp.stringerp.doctype.invoice_closing.invoice_closing.make_stock_entry_from_bom",
@@ -26,16 +26,7 @@ frappe.ui.form.on("Invoice Closing", {
                     freeze_message: "Submitting Invoice",
                 });
             });
-        }else if(frm.doc.docstatus == 1 & frm.doc.status == "Invoice Submitted"){
-            frm.add_custom_button(__('Cancel Invoice'), function () {
-                frappe.call({
-                    method: "cancel_invoice",
-                    doc: frm.doc,
-                    freeze: true,
-                    freeze_message: "Cancelling Invoice"
-                });
-            });
-        }   
+        }  
     },
     pos_profile(frm) {
         if (frm.doc.pos_profile) {
@@ -49,6 +40,7 @@ frappe.ui.form.on("Invoice Closing", {
                 callback: function (r) {
                     debugger;
                     let data = r.message.invoices;
+                    let total_amount = 0;
                     data.forEach(d => {
                         frm.add_child("invoices", {
                             invoice_no: d.name,
@@ -56,7 +48,9 @@ frappe.ui.form.on("Invoice Closing", {
                             amount: d.grand_total,
                             bill_type: d.custom_bill_type
                         });
+                        total_amount += d.grand_total;
                     });
+                    frm.set_value("total_amount", total_amount);
                     let bom_items = r.message.bom_items;
                     bom_items.forEach(b => {
                         frm.add_child("bom_items", {
@@ -88,4 +82,7 @@ frappe.ui.form.on("Invoice Closing", {
             })
         }
     },
+    on_cancel(frm){
+        frm.refresh_field("status");
+    }
 });
