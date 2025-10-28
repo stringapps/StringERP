@@ -34,6 +34,8 @@ class InvoiceClosing(Document):
         self.save(ignore_permissions = True)
 
     def on_submit(self):
+        if self.status != "Stock Entry Created":
+            frappe.throw("Please create stock entry first")
         self.submit_stock_entry()
         self.status = "Stock Entry Submitted"
 
@@ -52,9 +54,8 @@ class InvoiceClosing(Document):
         for inv in self.invoices:
             cancel_and_amend_sales_invoice(inv.invoice_no)
         frappe.msgprint(_("Invoices cancelled"))
-        self.status = "Invoice Cancelled"
-        self.save(ignore_permissions = True)
-            
+        frappe.db.set_value("Invoice Closing", self.name, "status", "Invoice Cancelled")
+        
     @frappe.whitelist()
     def submit_invoice(self):
         for inv in self.invoices:
@@ -63,6 +64,8 @@ class InvoiceClosing(Document):
         self.status = "Invoice Submitted"
         self.save(ignore_permissions = True)
 
+    def on_cancel(self):
+        self.cancel_invoice()
 
 def get_bom_summary(invoice_closing):
     bom_summary = frappe.db.sql("""
@@ -84,7 +87,7 @@ def get_siv(pos_profile):
     if not pos_profile:
         frappe.throw("POS Profile is required")
     existing_ic = frappe.db.get_value("Invoice Closing", {"pos_profile": pos_profile, "docstatus":0}, "name", order_by="creation asc")
-    
+
     prev_used_inv = frappe.db.sql_list("""
         SELECT UNIQUE invoice_no
         FROM `tabInvoice Closing Table` ICT
@@ -92,6 +95,8 @@ def get_siv(pos_profile):
         ON ICT.parent = IC.name
         WHERE IC.docstatus != 2
     """)
+
+    print(prev_used_inv)
     
     inv_filter = filters={
             "pos_profile": pos_profile,
@@ -143,11 +148,20 @@ def get_bom_items(invoices, pos_profile):
                 or_filters = {
                     "custom_warehouse": warehouse,
                     "custom_bill_type": inv.custom_bill_type if inv.custom_bill_type else None,
-                    "is_default": 1
                 },
                 fields = ["name"],
                 limit = 1
             )
+            if not bom:
+                bom = frappe.db.get_list("BOM", 
+                    filters = {
+                        "item": item.item_code,
+                        "is_active": 1,
+                        "is_default": 1
+                    },
+                    fields = ["name"],
+                    limit = 1
+                )
             if not bom:
                 frappe.throw(f"BOM not found for {item.item_code} (Invoice: {inv.name})")
             item["bom"] = bom[0].name
@@ -180,6 +194,9 @@ def make_stock_entry_from_bom(
         queue="long"  # use 'long' queue for heavy jobs
     )
 
+    ic_doc = frappe.get_doc("Invoice Closing", invoice_closing)
+    ic_doc.reload()
+
     return {
         "status": "queued",
         "message": _("Stock Entry creation for Invoice Closing {0} has been queued.").format(invoice_closing)
@@ -205,7 +222,8 @@ def create_stock_entry_from_bom_job(
 
     for bom in bom_summary:
         if frappe.db.exists("Stock Entry", {"bom_no": bom.bom, "custom_invoice_closing": invoice_closing, "docstatus": ["!=", 2]}):
-            frappe.throw(f"Stock Entry already exists for BOM {bom.bom} against invoice closing {invoice_closing}")
+            frappe.log_error(f"Stock Entry already exists for BOM {bom.bom} against invoice closing {invoice_closing}", "Stock Entry Duplication - {0}".format(invoice_closing))
+            continue
         bom_doc = frappe.get_doc("BOM", bom.bom)
     
         stock_entry = frappe.new_doc("Stock Entry")
@@ -247,12 +265,8 @@ def create_stock_entry_from_bom_job(
             ic_doc.db_set("status", "Stock Entry Submitted")
         else:
             ic_doc.db_set("status", "Stock Entry Created")
-        ic_doc.reload()
         frappe.logger("stock_entry_from_bom").info(
             f"Stock Entry {stock_entry.name} created successfully.")
-
-        return stock_entry.name
-
 
 # =================================================
 
@@ -281,8 +295,8 @@ def cancel_and_amend_sales_invoice(invoice_name):
         # 2️⃣ Check if it's submitted
         if doc.docstatus != 1:
             return {"status": "error", "message": f"Invoice {invoice_name} is not submitted."}
-
         # 3️⃣ Cancel the Sales Invoice
+        doc.flags.ignore_links = True
         doc.cancel()
         frappe.db.commit()
         frappe.logger("sales_invoice_amend").info(
@@ -293,6 +307,15 @@ def cancel_and_amend_sales_invoice(invoice_name):
         new_doc.amended_from = invoice_name
         new_doc.docstatus = 0  # Draft
         new_doc.posting_date = frappe.utils.nowdate()  # Optional: update date
+        new_doc.payments = []
+        for pm in doc.payments:
+            new_doc.append("payments", {
+                "mode_of_payment": pm.mode_of_payment,
+                "amount": pm.amount,
+                "account": pm.account,
+                "type": pm.type,
+                "base_amount": pm.base_amount
+            })
         new_doc.save(ignore_permissions=True)
         frappe.db.commit()
 
