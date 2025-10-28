@@ -35,7 +35,9 @@ frappe.ui.form.on("Invoice Closing", {
             frappe.call({
                 method: "stringerp.stringerp.doctype.invoice_closing.invoice_closing.get_siv",
                 args: {
-                    pos_profile: frm.doc.pos_profile
+                    pos_profile: frm.doc.pos_profile,
+                    invoice_closing: frm.doc.name,
+                    inv_posting_date: frm.doc.invoice_date
                 },
                 callback: function (r) {
                     debugger;
@@ -84,5 +86,12 @@ frappe.ui.form.on("Invoice Closing", {
     },
     on_cancel(frm){
         frm.refresh_field("status");
+    },
+    invoice_date(frm){
+        frm.set_value("pos_profile", "");
+        frm.set_value("invoices", []);
+        frm.set_value("bom_items", []);
+        frm.set_value("total_amount", 0);
+        frm.set_value("raw_materials", []);
     }
 });
