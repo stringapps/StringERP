@@ -34,8 +34,8 @@ class InvoiceClosing(Document):
         self.save(ignore_permissions = True)
 
     def on_submit(self):
-        if self.status != "Stock Entry Created":
-            frappe.throw("Please create stock entry first")
+        # if self.status != "Stock Entry Created":
+        #     frappe.throw("Please create stock entry first")
         self.submit_stock_entry()
         self.status = "Stock Entry Submitted"
 
@@ -83,20 +83,25 @@ def get_bom_summary(invoice_closing):
 
 # get sales invoices by pos profile =============================
 @frappe.whitelist()
-def get_siv(pos_profile):
+def get_siv(pos_profile, invoice_closing=None, inv_posting_date=None):
     if not pos_profile:
         frappe.throw("POS Profile is required")
-    existing_ic = frappe.db.get_value("Invoice Closing", {"pos_profile": pos_profile, "docstatus":0}, "name", order_by="creation asc")
 
+    ic_doc = None
+    additional_filter = ""
+    if frappe.db.exists("Invoice Closing", invoice_closing):
+        ic_doc = frappe.get_doc("Invoice Closing", invoice_closing)
+        if not frappe.db.exists("Stock Entry", {"custom_invoice_closing": invoice_closing, "docstatus": ["!=", 2]}):
+            additional_filter = " AND IC.name != '{0}'".format(invoice_closing)
+    
     prev_used_inv = frappe.db.sql_list("""
         SELECT UNIQUE invoice_no
         FROM `tabInvoice Closing Table` ICT
-        INNER JOIN `tabInvoice Closing` IC
+        INNER JOIN `tabInvoice Closing` IC  
         ON ICT.parent = IC.name
         WHERE IC.docstatus != 2
-    """)
-
-    print(prev_used_inv)
+        {additional_filter}
+    """.format(additional_filter=additional_filter))
     
     inv_filter = filters={
             "pos_profile": pos_profile,
@@ -104,6 +109,9 @@ def get_siv(pos_profile):
         }
     if prev_used_inv:
         inv_filter["name"] = ["not in", prev_used_inv]
+
+    if inv_posting_date:
+        inv_filter["posting_date"] = [">=", datetime.datetime.strptime(inv_posting_date, "%Y-%m-%d")]
 
     invoices = frappe.get_all(
         "Sales Invoice",
