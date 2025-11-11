@@ -132,13 +132,11 @@ app_license = "agpl-3.0"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Sales Invoice": {
+		"autoname": "stringerp.doc_events.sales_invoice.autoname",
+	}
+}
 
 # Scheduled Tasks
 # ---------------
@@ -274,7 +272,9 @@ fixtures = [
                     "BOM-custom_bill_type",
                     "Sales Invoice-custom_walkin_customer_alt_phone",
                     "BOM-custom_warehouse",
-                    "Stock Entry-custom_invoice_closing"
+                    "Stock Entry-custom_invoice_closing",
+                    "Sales Invoice-custom_custom_name",
+                    "Sales Invoice-custom_customer_order_no"
                 ],
             ],
         ],
