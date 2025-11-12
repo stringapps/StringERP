@@ -23,7 +23,7 @@ def create_siv(**kwargs):
 
         # Update existing invoice if same customer_order_no exists
         existing_invoice = frappe.db.exists(
-            "Sales Invoice", {"customer_order_no": mapped_data.get("customer_order_no")})
+            "Sales Invoice", {"custom_customer_order_no": kwargs.get("customerOrdernumber")})
 
         if existing_invoice:
             doc = frappe.get_doc("Sales Invoice", existing_invoice)
@@ -51,11 +51,11 @@ def map_external_to_sales_invoice(external_data):
 
     mapped = {
         "customer": external_data.get("firstName"),
-        # "customer_name": external_data.get("firstName") or "",
         "posting_date": external_data.get("billDate", "")[:10],
         "due_date": external_data.get("billDate", "")[:10],
         "remarks": external_data.get("Remarks"),
-        "customer_order_no": external_data.get("customerOrdernumber"),
+        "custom_customer_order_no": external_data.get("customerOrdernumber"),
+        "custom_custom_name": 1,
         "items": [],
         "payments": [],
         "is_pos": 1,
@@ -168,3 +168,65 @@ def get_customer_details(customer_id):
             "message": _("An unexpected error occurred. Please contact support."),
             "error": str(e) if frappe.conf.developer_mode else None
         }
+
+@frappe.whitelist(allow_guest=True)
+def create_sord(**kwargs):
+    try:
+        # If API sends JSON body as string, ensure it's parsed
+        if isinstance(kwargs, str):
+            kwargs = frappe.parse_json(kwargs)
+        elif isinstance(kwargs.get("data"), str):
+            kwargs = frappe.parse_json(kwargs.get("data"))
+        
+        if not frappe.db.exists("Customer", kwargs.get("firstName")):
+            raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
+
+        mapped_data = map_external_to_sales_order(kwargs)
+
+        doc = frappe.new_doc("Sales Order")
+        doc.update(mapped_data)
+        doc.insert(ignore_permissions=True)
+
+        response = {"status": "success", "order": doc}
+        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
+        return response
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
+        response = {"status": "error", "message": str(e)}
+        api_log(api="Create Sales Order", data=kwargs, response=str(response), status="Failed", error=e)
+        return response
+
+def map_external_to_sales_order(external_data):
+    mapped = {
+        "customer": external_data.get("firstName"),
+        "transaction_date": external_data.get("billDate", "")[:10],
+        "delivery_date": external_data.get("billDate", "")[:10],
+        "po_no": external_data.get("customerOrdernumber"),
+        "items": [],
+        "payments": [],
+        "discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
+        "taxes_and_charges": None,
+        "advance_paid": flt(external_data.get("nettotalwithVAT", 0)),
+        "custom_guid": external_data.get("guid") or ""
+    }
+
+    for item in external_data.get("items", []):
+        mapped["items"].append({
+            "item_code": item.get("barcode"),
+            "qty": flt(item.get("quantity", 1)),
+            "rate": flt(item.get("UnitPrice", 0)),
+            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "description": item.get("DiscTID")
+        })
+
+    for item in external_data.get("deliveryCharges", []):
+        mapped["items"].append({
+            "item_code": item.get("barcode"),
+            "qty": flt(item.get("quantity", 1)),
+            "rate": flt(item.get("UnitPrice", 0)),
+            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "description": item.get("DiscTID")
+        })
+
+    return mapped
