@@ -34,6 +34,9 @@ def create_siv(**kwargs):
         # Create new Sales Invoice
         doc = frappe.new_doc("Sales Invoice")
         doc.update(mapped_data)
+        # doc.run_method("set_missing_values")
+        # doc.run_method("calculate_taxes_and_totals")  
+        doc.set_taxes()
         doc.insert(ignore_permissions=True)
 
         response = {"status": "success", "invoice": doc}
