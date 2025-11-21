@@ -21,25 +21,30 @@ def create_siv(**kwargs):
         if not mapped_data.get("customer"):
             frappe.throw(_("Customer code is missing"))
 
-        # Update existing invoice if same customer_order_no exists
-        existing_invoice = frappe.db.exists(
-            "Sales Invoice", {"custom_customer_order_no": kwargs.get("customerOrdernumber")})
-
-        if existing_invoice:
-            doc = frappe.get_doc("Sales Invoice", existing_invoice)
+        if kwargs.get("Reupload"):
+            existing_invoice = frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid"), "docstatus": 0})
+            if existing_invoice:
+                doc = frappe.get_doc("Sales Invoice", existing_invoice)
+                doc.update(mapped_data)
+            elif not existing_invoice:
+                raise Exception("Reupload: No draft invoice found with GUID: {0}".format(kwargs.get("guid")))
+        elif frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid")}):
+            raise Exception("Invoice already exists with GUID: {0}".format(kwargs.get("guid")))
+        else:
+            doc = frappe.new_doc("Sales Invoice")
             doc.update(mapped_data)
-            doc.save()
-            return {"status": "updated", "invoice": doc.name}
-
-        # Create new Sales Invoice
-        doc = frappe.new_doc("Sales Invoice")
-        doc.update(mapped_data)
-        # doc.run_method("set_missing_values")
-        # doc.run_method("calculate_taxes_and_totals")  
         doc.set_taxes()
-        doc.insert(ignore_permissions=True)
+        doc.save(ignore_permissions=True)
 
-        response = {"status": "success", "invoice": doc}
+        invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")
+        invoice.items = frappe.db.get_all("Sales Invoice Item", {"parent": doc.name}, "*")
+        invoice.payments = frappe.db.get_all("Sales Invoice Payment", {"parent": doc.name}, "*")
+        invoice.taxes = frappe.db.get_all("Sales Taxes and Charges", {"parent": doc.name}, "*")
+
+        response = {
+            "status": "success",
+            "invoice": invoice
+        }
         api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
         return response
 
@@ -51,10 +56,12 @@ def create_siv(**kwargs):
 
 def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
-
     mapped = {
         "customer": external_data.get("firstName"),
-        "posting_date": external_data.get("billDate", "")[:10],
+        "custom_walkin_customer_name": external_data.get("custname"),
+        "set_posting_time": 1,
+        "posting_date": external_data.get("CRTime", "")[:10],
+        "posting_time": external_data.get("CRTime", "")[11:],
         "due_date": external_data.get("billDate", "")[:10],
         "remarks": external_data.get("Remarks"),
         "custom_customer_order_no": external_data.get("customerOrdernumber"),
@@ -63,7 +70,6 @@ def map_external_to_sales_invoice(external_data):
         "payments": [],
         "is_pos": 1,
         "is_return": 0,
-        "set_posting_time": 1,
         "is_paid": bool(external_data.get("ispaid")),
         "net_total": flt(external_data.get("nettotal", 0)),
         "discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
@@ -79,7 +85,8 @@ def map_external_to_sales_invoice(external_data):
         "custom_bill_type": bill_type_map.get(external_data.get("salestype")) or "",
         "custom_guid": external_data.get("guid") or "",
         "custom_no_of_pax": external_data.get("noOfPax"),
-        "custom_order_remarks": external_data.get("Remarks")
+        "custom_order_remarks": external_data.get("Remarks"),
+        "custom_table_no": external_data.get("tableno")
     }
 
     # Items mapping
@@ -87,8 +94,10 @@ def map_external_to_sales_invoice(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "rate": flt(item.get("UnitPrice", 0)),
-            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "rate": flt(item.get("rate", 0)),
+            "price_list_rate": flt(item.get("rate", 0)),
+            "discount_amount": flt(item.get("discrate", 0)),
+            "discount_percentage": flt(item.get("discrate", 0))/flt(item.get("rate")) * 100 if flt(item.get("rate")) != 0 else 0,
             "description": item.get("DiscTID")
         })
 
@@ -96,8 +105,9 @@ def map_external_to_sales_invoice(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "rate": flt(item.get("UnitPrice", 0)),
-            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "rate": flt(item.get("rate", 0)),
+            "price_list_rate": flt(item.get("rate", 0)),
+            "discount_percentage": flt(item.get("discrate", 0))/flt(item.get("rate")) * 100 if flt(item.get("rate")) != 0 else 0,
             "description": item.get("DiscTID")
         })
 
