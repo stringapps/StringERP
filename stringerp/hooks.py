@@ -274,7 +274,8 @@ fixtures = [
                     "BOM-custom_warehouse",
                     "Stock Entry-custom_invoice_closing",
                     "Sales Invoice-custom_custom_name",
-                    "Sales Invoice-custom_customer_order_no"
+                    "Sales Invoice-custom_customer_order_no",
+                    "Sales Invoice-custom_table_no"
                 ],
             ],
         ],
