@@ -58,6 +58,7 @@ def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
     mapped = {
         "customer": external_data.get("firstName"),
+        "ignore_pricing_rule": 1,
         "custom_walkin_customer_name": external_data.get("custname"),
         "set_posting_time": 1,
         "posting_date": external_data.get("CRTime", "")[:10],
@@ -94,10 +95,8 @@ def map_external_to_sales_invoice(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "rate": flt(item.get("rate", 0)),
             "price_list_rate": flt(item.get("rate", 0)),
-            "discount_amount": flt(item.get("discrate", 0)),
-            "discount_percentage": flt(item.get("discrate", 0))/flt(item.get("rate")) * 100 if flt(item.get("rate")) != 0 else 0,
+            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
             "description": item.get("DiscTID")
         })
 
@@ -105,9 +104,8 @@ def map_external_to_sales_invoice(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "rate": flt(item.get("rate", 0)),
             "price_list_rate": flt(item.get("rate", 0)),
-            "discount_percentage": flt(item.get("discrate", 0))/flt(item.get("rate")) * 100 if flt(item.get("rate")) != 0 else 0,
+            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
             "description": item.get("DiscTID")
         })
 
@@ -124,7 +122,6 @@ def map_external_to_sales_invoice(external_data):
             })
 
     return mapped
-
 
 @frappe.whitelist(allow_guest=False)
 def get_customer_details(customer_id):
