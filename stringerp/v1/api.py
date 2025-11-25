@@ -34,6 +34,8 @@ def create_siv(**kwargs):
             doc = frappe.new_doc("Sales Invoice")
             doc.update(mapped_data)
         doc.set_taxes()
+        # doc.set_missing_values()
+        # doc.calculate_taxes_and_totals()
         doc.save(ignore_permissions=True)
 
         invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")
@@ -73,8 +75,7 @@ def map_external_to_sales_invoice(external_data):
         "is_return": 0,
         "is_paid": bool(external_data.get("ispaid")),
         "net_total": flt(external_data.get("nettotal", 0)),
-        "discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
-        "taxes_and_charges": None,
+        # "taxes_and_charges": None,
         "other_charges_calculation": flt(external_data.get("VATAmount", 0)),
         "grand_total": flt(external_data.get("nettotalwithVAT", 0)),
         "total": flt(external_data.get("subtotal", 0)),
@@ -87,7 +88,8 @@ def map_external_to_sales_invoice(external_data):
         "custom_guid": external_data.get("guid") or "",
         "custom_no_of_pax": external_data.get("noOfPax"),
         "custom_order_remarks": external_data.get("Remarks"),
-        "custom_table_no": external_data.get("tableno")
+        "custom_table_no": external_data.get("tableno"),
+        "disable_rounded_total": True
     }
 
     # Items mapping
