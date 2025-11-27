@@ -89,7 +89,8 @@ def map_external_to_sales_invoice(external_data):
         "custom_no_of_pax": external_data.get("noOfPax"),
         "custom_order_remarks": external_data.get("Remarks"),
         "custom_table_no": external_data.get("tableno"),
-        "disable_rounded_total": True
+        "disable_rounded_total": True,
+        "sales_team":[]
     }
 
     # Items mapping
@@ -110,6 +111,13 @@ def map_external_to_sales_invoice(external_data):
             "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
             "description": item.get("DiscTID")
         })
+
+    if external_data.get("salesmancode"):
+        mapped["sales_team"].append({
+            "sales_person": external_data.get("salesmancode"),
+            "allocated_percentage": 100
+        })
+
 
     # Handle payment entries if is_paid or payments exist
     if external_data.get("is_paid") or external_data.get("payments"):
