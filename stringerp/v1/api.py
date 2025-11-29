@@ -12,7 +12,28 @@ def create_siv(**kwargs):
             kwargs = frappe.parse_json(kwargs)
         elif isinstance(kwargs.get("data"), str):
             kwargs = frappe.parse_json(kwargs.get("data"))
-        
+        response = None
+        order_type = ""
+        if kwargs.get("ordertype") == "Invoice":
+            response = create_invoice(kwargs)
+            order_type = "Invoice"
+        elif kwargs.get("ordertype") == "Order":
+            response = create_sord(kwargs)
+            order_type = "Order"
+        else:
+            raise Exception("Invalid ordertype")
+        return response        
+    except Exception as e:
+        if order_type:
+            frappe.log_error(frappe.get_traceback(), order_type + " " + "Sync Failed")
+            api_log(api="Create Sales " + order_type, data=kwargs, response=str(response), status="Failed", error=e)
+        else:
+            frappe.log_error(frappe.get_traceback(), "Sync Failed")
+            api_log(api="Create Sales", data=kwargs, response=str(response), status="Failed", error=e)
+        response = {"status": "error", "message": str(e)}
+        return response
+
+def create_invoice(kwargs):
         if not frappe.db.exists("Customer", kwargs.get("firstName")):
             raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
 
@@ -48,12 +69,6 @@ def create_siv(**kwargs):
             "invoice": invoice
         }
         api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
-        return response
-
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
-        response = {"status": "error", "message": str(e)}
-        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Failed", error=e)
         return response
 
 def map_external_to_sales_invoice(external_data):
@@ -120,7 +135,7 @@ def map_external_to_sales_invoice(external_data):
 
 
     # Handle payment entries if is_paid or payments exist
-    if external_data.get("is_paid") or external_data.get("payments"):
+    if external_data.get("ispaid"):
         for pay in external_data.get("payments", []):
             mode_of_payment = pay.get("CARDTYPE", "Cash")
             amount = flt(pay.get("AMOUNT", 0))
@@ -189,33 +204,25 @@ def get_customer_details(customer_id):
             "error": str(e) if frappe.conf.developer_mode else None
         }
 
-@frappe.whitelist(allow_guest=True)
-def create_sord(**kwargs):
-    try:
-        # If API sends JSON body as string, ensure it's parsed
-        if isinstance(kwargs, str):
-            kwargs = frappe.parse_json(kwargs)
-        elif isinstance(kwargs.get("data"), str):
-            kwargs = frappe.parse_json(kwargs.get("data"))
+def create_sord(kwargs):
+    # If API sends JSON body as string, ensure it's parsed
+    if isinstance(kwargs, str):
+        kwargs = frappe.parse_json(kwargs)
+    elif isinstance(kwargs.get("data"), str):
+        kwargs = frappe.parse_json(kwargs.get("data"))
+
+    if not frappe.db.exists("Customer", kwargs.get("firstName")):
+        customer = create_customer(kwargs)
         
-        if not frappe.db.exists("Customer", kwargs.get("firstName")):
-            raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
+    mapped_data = map_external_to_sales_order(kwargs)
 
-        mapped_data = map_external_to_sales_order(kwargs)
+    doc = frappe.new_doc("Sales Order")
+    doc.update(mapped_data)
+    doc.insert(ignore_permissions=True)
 
-        doc = frappe.new_doc("Sales Order")
-        doc.update(mapped_data)
-        doc.insert(ignore_permissions=True)
-
-        response = {"status": "success", "order": doc}
-        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
-        return response
-
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Invoice Sync Failed")
-        response = {"status": "error", "message": str(e)}
-        api_log(api="Create Sales Order", data=kwargs, response=str(response), status="Failed", error=e)
-        return response
+    response = {"status": "success", "order": doc}
+    api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
+    return response
 
 def map_external_to_sales_order(external_data):
     mapped = {
@@ -226,7 +233,6 @@ def map_external_to_sales_order(external_data):
         "items": [],
         "payments": [],
         "discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
-        "taxes_and_charges": None,
         "advance_paid": flt(external_data.get("nettotalwithVAT", 0)),
         "custom_guid": external_data.get("guid") or ""
     }
@@ -235,8 +241,8 @@ def map_external_to_sales_order(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "rate": flt(item.get("UnitPrice", 0)),
-            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "price_list_rate": flt(item.get("rate", 0)),
+            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
             "description": item.get("DiscTID")
         })
 
@@ -244,9 +250,16 @@ def map_external_to_sales_order(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "rate": flt(item.get("UnitPrice", 0)),
-            "discount_percentage": flt(item.get("UnitDisc", 0)),
+            "price_list_rate": flt(item.get("rate", 0)),
+            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
             "description": item.get("DiscTID")
         })
 
     return mapped
+
+def create_customer(kwargs):
+    customer = frappe.new_doc("Customer")
+    customer.customer_name = kwargs.get("firstName")
+    customer.tax_category = "Standard VAT"
+    customer.insert()
+    return customer.name
