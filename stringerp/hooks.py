@@ -275,7 +275,10 @@ fixtures = [
                     "Stock Entry-custom_invoice_closing",
                     "Sales Invoice-custom_custom_name",
                     "Sales Invoice-custom_customer_order_no",
-                    "Sales Invoice-custom_table_no"
+                    "Sales Invoice-custom_table_no",
+                    "Sales Order-custom_walkin_customer_address",
+                    "Sales Order-custom_customer_order_no",
+                    "Sales Order-custom_guid"
                 ],
             ],
         ],

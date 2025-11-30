@@ -3,6 +3,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 from stringerp.v1.utils import api_log, bill_type_map
+from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+from datetime import date
 
 @frappe.whitelist(allow_guest=True)
 def create_siv(**kwargs):
@@ -49,8 +51,10 @@ def create_invoice(kwargs):
                 doc.update(mapped_data)
             elif not existing_invoice:
                 raise Exception("Reupload: No draft invoice found with GUID: {0}".format(kwargs.get("guid")))
-        elif frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid")}):
+        elif kwargs.get("guid") and frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid")}):
             raise Exception("Invoice already exists with GUID: {0}".format(kwargs.get("guid")))
+        elif kwargs.get("customerOrdernumber") and frappe.db.exists("Sales Invoice", {"custom_customer_order_no": kwargs.get("customerOrdernumber")}):
+            raise Exception("Order already exists with Customer Order No: {0}".format(kwargs.get("customerOrdernumber")))
         else:
             doc = frappe.new_doc("Sales Invoice")
             doc.update(mapped_data)
@@ -205,11 +209,11 @@ def get_customer_details(customer_id):
         }
 
 def create_sord(kwargs):
-    # If API sends JSON body as string, ensure it's parsed
-    if isinstance(kwargs, str):
-        kwargs = frappe.parse_json(kwargs)
-    elif isinstance(kwargs.get("data"), str):
-        kwargs = frappe.parse_json(kwargs.get("data"))
+    if kwargs.get("guid") and frappe.db.exists("Sales Order", {"custom_guid": kwargs.get("guid")}):
+        raise Exception("Order already exists with GUID: {0}".format(kwargs.get("guid")))
+           
+    if kwargs.get("customerOrdernumber") and frappe.db.exists("Sales Order", {"custom_customer_order_no": kwargs.get("customerOrdernumber")}):
+        raise Exception("Order already exists with Customer Order No: {0}".format(kwargs.get("customerOrdernumber")))
 
     if not frappe.db.exists("Customer", kwargs.get("firstName")):
         customer = create_customer(kwargs)
@@ -219,22 +223,35 @@ def create_sord(kwargs):
     doc = frappe.new_doc("Sales Order")
     doc.update(mapped_data)
     doc.insert(ignore_permissions=True)
+    doc.submit()
 
-    response = {"status": "success", "order": doc}
-    api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
+    payment = {}
+    if kwargs.get("ispaid"):
+        pe_doc = get_payment_entry(dt="Sales Order", dn=doc.name)
+        pe_doc.reference_no = doc.name
+        pe_doc.reference_date = doc.transaction_date
+        pe_doc.insert()
+        pe_doc.submit()
+        payment = pe_doc.as_dict()
+
+    response = {"status": "success", "order": doc, "payment": payment}
+    api_log(api="Create Sales Order", data=kwargs, response=str(response), status="Success")
     return response
 
 def map_external_to_sales_order(external_data):
     mapped = {
         "customer": external_data.get("firstName"),
-        "transaction_date": external_data.get("billDate", "")[:10],
-        "delivery_date": external_data.get("billDate", "")[:10],
-        "po_no": external_data.get("customerOrdernumber"),
+        "custom_walkin_customer_address": external_data.get("address1") or "",
+        "transaction_date": external_data.get("CRTime", "")[:10] or date.today(),
+        "delivery_date": external_data.get("CRTime", "")[:10] or date.today(),
+        "remarks": external_data.get("Remarks"),
+        "custom_customer_order_no": external_data.get("customerOrdernumber"),
         "items": [],
         "payments": [],
         "discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
-        "advance_paid": flt(external_data.get("nettotalwithVAT", 0)),
-        "custom_guid": external_data.get("guid") or ""
+        "custom_guid": external_data.get("guid") or "",
+        "disable_rounded_total": True,
+        "sales_team": []
     }
 
     for item in external_data.get("items", []):
@@ -255,6 +272,12 @@ def map_external_to_sales_order(external_data):
             "description": item.get("DiscTID")
         })
 
+    if external_data.get("salesmancode"):
+        mapped["sales_team"].append({
+            "sales_person": external_data.get("salesmancode"),
+            "allocated_percentage": 100
+        })
+        
     return mapped
 
 def create_customer(kwargs):
