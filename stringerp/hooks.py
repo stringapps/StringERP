@@ -278,11 +278,12 @@ fixtures = [
                     "Sales Invoice-custom_table_no",
                     "Sales Order-custom_walkin_customer_address",
                     "Sales Order-custom_customer_order_no",
-                    "Sales Order-custom_guid"
+                    "Sales Order-custom_guid",
+                    "Sales Person-custom_sales_person_code",
+                    "Customer-custom_customer_code"
                 ],
             ],
-        ],
-       
+        ],   
     },
     {
      "doctype": "Property Setter",

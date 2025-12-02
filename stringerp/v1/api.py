@@ -36,8 +36,14 @@ def create_siv(**kwargs):
         return response
 
 def create_invoice(kwargs):
-        if not frappe.db.exists("Customer", kwargs.get("firstName")):
-            raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
+        if not kwargs.get("customercode"):
+            raise Exception(_("Customer code is missing"))
+
+        if not frappe.db.exists("Customer", {"custom_customer_code": kwargs.get("customercode")}):
+            raise Exception(_("Customer with customer code {0} is missing".format(kwargs.get("customercode"))))
+
+        # if not frappe.db.exists("Customer", kwargs.get("firstName")):
+        #     raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
 
         mapped_data = map_external_to_sales_invoice(kwargs)
 
@@ -78,7 +84,8 @@ def create_invoice(kwargs):
 def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
     mapped = {
-        "customer": external_data.get("firstName"),
+        # "customer": external_data.get("firstName"),
+        "customer": frappe.db.get_value("Customer", {"custom_customer_code": external_data.get("customercode")}, "name"),
         "ignore_pricing_rule": 1,
         "custom_walkin_customer_name": external_data.get("custname"),
         "set_posting_time": 1,
@@ -109,7 +116,8 @@ def map_external_to_sales_invoice(external_data):
         "custom_order_remarks": external_data.get("Remarks"),
         "custom_table_no": external_data.get("tableno"),
         "disable_rounded_total": True,
-        "sales_team":[]
+        "sales_team":[],
+        "custom_online_order_id": external_data.get("onlineOrderId")
     }
 
     # Items mapping
@@ -132,8 +140,11 @@ def map_external_to_sales_invoice(external_data):
         })
 
     if external_data.get("salesmancode"):
+        sp = frappe.db.exists("Sales Person", {"custom_sales_person_code": external_data.get("salesmancode")})
+        if not sp:
+            raise Exception("Sales Person {0} is missing".format(external_data.get("salesmancode")))
         mapped["sales_team"].append({
-            "sales_person": external_data.get("salesmancode"),
+            "sales_person": sp,
             "allocated_percentage": 100
         })
 
