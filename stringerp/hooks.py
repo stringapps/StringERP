@@ -280,7 +280,8 @@ fixtures = [
                     "Sales Order-custom_customer_order_no",
                     "Sales Order-custom_guid",
                     "Sales Person-custom_sales_person_code",
-                    "Customer-custom_customer_code"
+                    "Customer-custom_customer_code",
+                    "Sales Invoice Item-custom_disctid"
                 ],
             ],
         ],   
