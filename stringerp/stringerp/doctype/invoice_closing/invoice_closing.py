@@ -248,6 +248,7 @@ def create_stock_entry_from_bom_job(
         stock_entry.custom_invoice_closing = invoice_closing
 
         # Define warehouses
+        stock_entry.from_warehouse = target_warehouse or bom_doc.default_fg_warehouse
         stock_entry.to_warehouse = target_warehouse or bom.default_fg_warehouse
 
         # Populate BOM items
@@ -261,7 +262,8 @@ def create_stock_entry_from_bom_job(
                 "t_warehouse": target_warehouse or bom.default_fg_warehouse,
                 "is_finished_item": 1,
                 "uom": frappe.db.get_value("Item", bom.item, "stock_uom"),
-                "conversion_factor": 1
+                "conversion_factor": 1,
+                "allow_zero_valuation_rate": 1
             })
 
         stock_entry.set_stock_entry_type()
