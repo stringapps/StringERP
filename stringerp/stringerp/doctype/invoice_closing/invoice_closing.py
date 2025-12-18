@@ -43,6 +43,8 @@ class InvoiceClosing(Document):
         se_list = frappe.db.sql_list("""
             SELECT name FROM `tabStock Entry` WHERE custom_invoice_closing = %s AND docstatus = 0
         """, (self.name))
+        if not se_list:
+            frappe.throw("No stock entry found!")
         for se in se_list:
             try:
                 frappe.get_doc("Stock Entry", se).submit()
@@ -243,7 +245,7 @@ def create_stock_entry_from_bom_job(
         stock_entry.set_posting_time = True
         posting_date, posting_time = get_posting_time_from_invoice(invoice_closing)
         stock_entry.posting_date = posting_date
-        stock_entry.posting_time = posting_time - datetime.timedelta(minutes=10)
+        stock_entry.posting_time = posting_time
         stock_entry.inspection_required = bom_doc.inspection_required
         stock_entry.custom_invoice_closing = invoice_closing
 
