@@ -36,50 +36,50 @@ def create_siv(**kwargs):
         return response
 
 def create_invoice(kwargs):
-        if not kwargs.get("customercode"):
-            raise Exception(_("Customer code is missing"))
+    if not kwargs.get("customercode"):
+        raise Exception(_("Customer code is missing"))
 
-        if not frappe.db.exists("Customer", {"custom_customer_code": kwargs.get("customercode")}):
-            raise Exception(_("Customer with customer code {0} is missing".format(kwargs.get("customercode"))))
+    if not frappe.db.exists("Customer", {"custom_customer_code": kwargs.get("customercode")}):
+        raise Exception(_("Customer with customer code {0} is missing".format(kwargs.get("customercode"))))
 
-        # if not frappe.db.exists("Customer", kwargs.get("firstName")):
-        #     raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
+    # if not frappe.db.exists("Customer", kwargs.get("firstName")):
+    #     raise Exception(_("Customer {0} is missing".format(kwargs.get("firstName"))))
 
-        mapped_data = map_external_to_sales_invoice(kwargs)
+    mapped_data = map_external_to_sales_invoice(kwargs)
 
-        if not mapped_data.get("customer"):
-            frappe.throw(_("Customer code is missing"))
+    if not mapped_data.get("customer"):
+        frappe.throw(_("Customer code is missing"))
 
-        if kwargs.get("Reupload"):
-            existing_invoice = frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid"), "docstatus": 0})
-            if existing_invoice:
-                doc = frappe.get_doc("Sales Invoice", existing_invoice)
-                doc.update(mapped_data)
-            elif not existing_invoice:
-                raise Exception("Reupload: No draft invoice found with GUID: {0}".format(kwargs.get("guid")))
-        elif kwargs.get("guid") and frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid")}):
-            raise Exception("Invoice already exists with GUID: {0}".format(kwargs.get("guid")))
-        elif kwargs.get("customerOrdernumber") and frappe.db.exists("Sales Invoice", {"custom_customer_order_no": kwargs.get("customerOrdernumber")}):
-            raise Exception("Order already exists with Customer Order No: {0}".format(kwargs.get("customerOrdernumber")))
-        else:
-            doc = frappe.new_doc("Sales Invoice")
+    if kwargs.get("Reupload"):
+        existing_invoice = frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid"), "docstatus": 0})
+        if existing_invoice:
+            doc = frappe.get_doc("Sales Invoice", existing_invoice)
             doc.update(mapped_data)
-        doc.set_taxes()
-        # doc.set_missing_values()
-        # doc.calculate_taxes_and_totals()
-        doc.save(ignore_permissions=True)
+        elif not existing_invoice:
+            raise Exception("Reupload: No draft invoice found with GUID: {0}".format(kwargs.get("guid")))
+    elif kwargs.get("guid") and frappe.db.exists("Sales Invoice", {"custom_guid": kwargs.get("guid")}):
+        raise Exception("Invoice already exists with GUID: {0}".format(kwargs.get("guid")))
+    elif kwargs.get("customerOrdernumber") and frappe.db.exists("Sales Invoice", {"custom_customer_order_no": kwargs.get("customerOrdernumber")}):
+        raise Exception("Order already exists with Customer Order No: {0}".format(kwargs.get("customerOrdernumber")))
+    else:
+        doc = frappe.new_doc("Sales Invoice")
+        doc.update(mapped_data)
+    doc.set_taxes()
+    # doc.set_missing_values()
+    # doc.calculate_taxes_and_totals()
+    doc.save(ignore_permissions=True)
 
-        invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")
-        invoice.items = frappe.db.get_all("Sales Invoice Item", {"parent": doc.name}, "*")
-        invoice.payments = frappe.db.get_all("Sales Invoice Payment", {"parent": doc.name}, "*")
-        invoice.taxes = frappe.db.get_all("Sales Taxes and Charges", {"parent": doc.name}, "*")
+    invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")
+    invoice.items = frappe.db.get_all("Sales Invoice Item", {"parent": doc.name}, "*")
+    invoice.payments = frappe.db.get_all("Sales Invoice Payment", {"parent": doc.name}, "*")
+    invoice.taxes = frappe.db.get_all("Sales Taxes and Charges", {"parent": doc.name}, "*")
 
-        response = {
-            "status": "success",
-            "invoice": invoice
-        }
-        api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
-        return response
+    response = {
+        "status": "success",
+        "invoice": invoice
+    }
+    api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
+    return response
 
 def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""

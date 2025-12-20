@@ -303,12 +303,15 @@ def cancel_and_amend_sales_invoice(invoice_name):
     try:
         # 1️⃣ Get the Sales Invoice document
         doc = frappe.get_doc("Sales Invoice", invoice_name)
-
+        guid = doc.custom_guid
+        order_number = doc.custom_customer_order_no
         # 2️⃣ Check if it's submitted
         if doc.docstatus != 1:
             return {"status": "error", "message": f"Invoice {invoice_name} is not submitted."}
         # 3️⃣ Cancel the Sales Invoice
         doc.flags.ignore_links = True
+        doc.custom_guid = ""
+        doc.custom_customer_order_no = ""
         doc.cancel()
         frappe.db.commit()
         frappe.logger("sales_invoice_amend").info(
@@ -318,7 +321,9 @@ def cancel_and_amend_sales_invoice(invoice_name):
         new_doc = frappe.copy_doc(doc)
         new_doc.amended_from = invoice_name
         new_doc.docstatus = 0  # Draft
-        new_doc.posting_date = frappe.utils.nowdate()  # Optional: update date
+        new_doc.posting_date = doc.posting_date  # Optional: update date
+        new_doc.custom_guid = guid
+        new_doc.custom_customer_order_no = order_number
         new_doc.payments = []
         for pm in doc.payments:
             new_doc.append("payments", {
