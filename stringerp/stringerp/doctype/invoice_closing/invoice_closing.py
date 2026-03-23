@@ -254,13 +254,13 @@ def create_stock_entry_from_bom_job(
         stock_entry.to_warehouse = target_warehouse or bom.default_fg_warehouse
 
         # Populate BOM items
-        stock_entry.get_items(bom.total_qty, bom_doc.item)
-
+        # stock_entry.get_items(bom.total_qty, bom_doc.item)
+        stock_entry.get_items()
         # Add FG if missing
         if not any(d.is_finished_item for d in stock_entry.items):
             stock_entry.append("items", {
                 "item_code": bom.item,
-                "qty": qty,
+                "qty": bom.total_qty,
                 "t_warehouse": target_warehouse or bom.default_fg_warehouse,
                 "is_finished_item": 1,
                 "uom": frappe.db.get_value("Item", bom.item, "stock_uom"),
@@ -271,7 +271,7 @@ def create_stock_entry_from_bom_job(
         stock_entry.set_stock_entry_type()
 
         # Save and submit (optional)
-        stock_entry.insert(ignore_permissions=True)
+        stock_entry.insert()
         if auto_submit:
             stock_entry.submit()
             ic_doc.db_set("status", "Stock Entry Submitted")

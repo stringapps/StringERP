@@ -14,59 +14,56 @@ Content-Type: application/json
 
 
 ### Test Create SIV API (POST)
-POST http://127.0.0.1:8014/api/method/stringerp.v1.api.create_siv
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
 Content-Type: application/json
 
 {
-  "firstName": "STAFF",
-  "phoneNumber": "EMP00011",
-  "address1": "12",
-  "guid": "68360e8c1f251",
-  "salesmancode": "800",
-  "deliverymancode": null,
-  "customercode": "EMP00011",
-  "salestype": "OT",
-  "subtotal": 7.1,
-  "SubTotalDiscount": 0,
+  "custname": "",
+  "firstName": "Walkin Customer",
+  "phoneNumber": "",
+  "address1": "Flat: , Building: , Street: , Block: ",
+  "guid": "69bfad625a8d5",
+  "salesmancode": "900",
+  "altPhone": "",
+  "deliverymancode": "",
+  "customercode": "Walkin Customer",
+  "onlineOrderId": "",
+  "ordertype": "Invoice",
+  "salestype": "DI",
+  "subtotal": 2,
+  "SubTotalDiscount": 0.2,
   "shipping": 0,
-  "nettotal": 7.1,
-  "VATAmount": 0.71,
-  "nettotalwithVAT": 7.81,
+  "nettotal": 1.8,
+  "VATAmount": 0.18,
+  "nettotalwithVAT": 1.98,
   "ispaid": 1,
-  "billDate": "2025-04-18 00:42:11",
-  "CRTime": "2025-04-18 00:42:11",
+  "noOfPax": "1",
+  "billDate": "2026-03-22 11:50:42",
+  "tableno": "INDOOR T2-A",
+  "CRTime": "2026-03-22 11:50:42",
   "Remarks": "",
-  "customerOrdernumber": "TTS-2500077",
   "Reupload": 0,
+  "customerOrdernumber": "BTS-2600162",
   "items": [
     {
-      "barcode": "0001",
+      "barcode": "258",
       "quantity": 1,
-      "UnitPrice": "1.90000",
-      "UnitDisc": "0.00000",
-      "DiscTID": "DINEIN SECTION"
-    },
-    {
-      "barcode": "0001",
-      "quantity": 1,
-      "UnitPrice": "2.50000",
-      "UnitDisc": "0.00000",
-      "DiscTID": "DINEIN SECTION"
-    },
-    {
-      "barcode": "0001",
-      "quantity": 1,
-      "UnitPrice": "2.70000",
-      "UnitDisc": "0.00000",
-      "DiscTID": "DINEIN SECTION"
+      "UnitPrice": 2,
+      "rate": 2,
+      "discrate": 0.2,
+      "UnitDisc": 0.2,
+      "DiscTID": "DINE IN"
     }
   ],
   "payments": [
     {
       "POS_PAYCODE": 2,
-      "CARDTYPE": "Cash",
+      "CARDTYPE": "CASH",
       "CARDNO": "",
-      "AMOUNT": 7.81
+      "AMOUNT": 1.98
     }
-  ]
+  ],
+  "deliveryCharges": [],
+  "posPayCode": 2,
+  "posProfile": "ARAD"
 }
