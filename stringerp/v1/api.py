@@ -22,6 +22,9 @@ def create_siv(**kwargs):
         elif kwargs.get("ordertype") == "Order":
             response = create_sord(kwargs)
             order_type = "Order"
+        elif kwargs.get("ordertype") == "Debit note":
+            response = create_invoice(kwargs)
+            order_type = "Debit note"
         else:
             raise Exception("Invalid ordertype")
         return response        
@@ -67,6 +70,9 @@ def create_invoice(kwargs):
     doc.set_taxes()
     # doc.set_missing_values()
     # doc.calculate_taxes_and_totals()
+    doc.update_stock = 1 
+    if kwargs.get("ordertype") == "Debit note":
+        doc.is_debit_note = 1
     doc.save(ignore_permissions=True)
 
     invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")

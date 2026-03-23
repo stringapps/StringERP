@@ -22,7 +22,7 @@ Content-Type: application/json
   "firstName": "Walkin Customer",
   "phoneNumber": "",
   "address1": "Flat: , Building: , Street: , Block: ",
-  "guid": "69bfad625a8d5",
+  "guid": "69bfad62d5aw8d5",
   "salesmancode": "900",
   "altPhone": "",
   "deliverymancode": "",
@@ -43,7 +43,7 @@ Content-Type: application/json
   "CRTime": "2026-03-22 11:50:42",
   "Remarks": "",
   "Reupload": 0,
-  "customerOrdernumber": "BTS-2600162",
+  "customerOrdernumber": "BTS-242600162",
   "items": [
     {
       "barcode": "258",
@@ -62,6 +62,57 @@ Content-Type: application/json
       "CARDNO": "",
       "AMOUNT": 1.98
     }
+  ],
+  "deliveryCharges": [],
+  "posPayCode": 2,
+  "posProfile": "ARAD"
+}
+
+
+### Test Create SIV API (POST) with Debit Note
+
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
+Content-Type: application/json
+
+{
+  "custname": "",
+  "firstName": "Walkin Customer",
+  "phoneNumber": "",
+  "address1": "Flat: , Building: , Street: , Block: ",
+  "guid": "69bfad62d5awf8d5",
+  "salesmancode": "900",
+  "altPhone": "",
+  "deliverymancode": "",
+  "customercode": "Walkin Customer",
+  "onlineOrderId": "",
+  "ordertype": "Debit note",
+  "salestype": "DI",
+  "subtotal": 2,
+  "SubTotalDiscount": 0.2,
+  "shipping": 0,
+  "nettotal": 1.8,
+  "VATAmount": 0.18,
+  "nettotalwithVAT": 1.98,
+  "ispaid": 1,
+  "noOfPax": "1",
+  "billDate": "2026-03-22 11:50:42",
+  "tableno": "INDOOR T2-A",
+  "CRTime": "2026-03-22 11:50:42",
+  "Remarks": "",
+  "Reupload": 0,
+  "customerOrdernumber": "BTS-232600162",
+  "items": [
+    {
+      "barcode": "258",
+      "quantity": 0,
+      "UnitPrice": 0,
+      "rate":0,
+      "discrate": 0,
+      "UnitDisc": 0,
+      "DiscTID": "DINE IN"
+    }
+  ],
+  "payments": [
   ],
   "deliveryCharges": [],
   "posPayCode": 2,
