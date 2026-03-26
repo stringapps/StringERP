@@ -113,7 +113,7 @@ def get_siv(pos_profile, invoice_closing=None, inv_posting_date=None):
         inv_filter["name"] = ["not in", prev_used_inv]
 
     if inv_posting_date:
-        inv_filter["posting_date"] = [">=", datetime.datetime.strptime(inv_posting_date, "%Y-%m-%d")]
+        inv_filter["posting_date"] = ["=", datetime.datetime.strptime(inv_posting_date, "%Y-%m-%d")]
 
     invoices = frappe.get_all(
         "Sales Invoice",
