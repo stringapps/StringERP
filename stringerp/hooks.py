@@ -135,6 +135,8 @@ app_license = "agpl-3.0"
 doc_events = {
 	"Sales Invoice": {
 		"autoname": "stringerp.doc_events.sales_invoice.autoname",
+		"validate": "stringerp.doc_events.sales_invoice.validate"
+
 	}
 }
 
@@ -281,7 +283,8 @@ fixtures = [
                     "Sales Order-custom_guid",
                     "Sales Person-custom_sales_person_code",
                     "Customer-custom_customer_code",
-                    "Sales Invoice Item-custom_disctid"
+                    "Sales Invoice Item-custom_disctid",
+                    "Sales Invoice Item-custom_discount_rate"
                 ],
             ],
         ],   

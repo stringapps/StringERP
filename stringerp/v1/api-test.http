@@ -118,3 +118,121 @@ Content-Type: application/json
   "posPayCode": 2,
   "posProfile": "ARAD"
 }
+
+
+
+
+
+
+
+
+
+
+### Test Create SIV API (POST) with multiple items and discounts
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
+Content-Type: application/json
+
+{
+  "custname": "",
+  "firstName": "Walkin Customer",
+  "phoneNumber": "",
+  "address1": "Flat: , Building: , Street: , Block: ",
+  "guid": "69bd73e4e400a",
+  "salesmancode": "553",
+  "altPhone": "",
+  "deliverymancode": "",
+  "customercode": "Walkin Customer",
+  "onlineOrderId": "",
+  "ordertype": "Invoice",
+  "salestype": "DI",
+  "subtotal": 34,
+  "SubTotalDiscount": 11.727,
+  "shipping": 0,
+  "nettotal": 22.273,
+  "VATAmount": 2.227,
+  "nettotalwithVAT": 24.5,
+  "ispaid": 1,
+  "noOfPax": "6",
+  "billDate": "2026-03-20 21:25:21",
+  "tableno": "INDOOR T2-A",
+  "CRTime": "2026-03-20 21:25:21",
+  "Remarks": "",
+  "Reupload": 0,
+  "customerOrdernumber": "BTS-2600030",
+  "items": [
+    {
+      "barcode": "BT0023",
+      "quantity": 2,
+      "UnitPrice": 4.54546,
+      "rate": 2.27273,
+      "discrate": 0,
+      "UnitDisc": 0,
+      "DiscTID": "DINE IN"
+    },
+    {
+      "barcode": "BT0041",
+      "quantity": 2,
+      "UnitPrice": 4,
+      "rate": 2,
+      "discrate": 0,
+      "UnitDisc": 0,
+      "DiscTID": "DINE IN"
+    },
+    {
+      "barcode": "BT0066",
+      "quantity": 1,
+      "UnitPrice": 6.36364,
+      "rate": 6.36364,
+      "discrate": 6.36364,
+      "UnitDisc": 6.36364,
+      "DiscTID": "ENTERTAINER"
+    },
+    {
+      "barcode": "BT0066",
+      "quantity": 1,
+      "UnitPrice": 6.36364,
+      "rate": 6.36364,
+      "discrate": 0,
+      "UnitDisc": 0,
+      "DiscTID": "DINE IN"
+    },
+    {
+      "barcode": "BT0103",
+      "quantity": 1,
+      "UnitPrice": 5.36364,
+      "rate": 5.3634,
+      "discrate": 0,
+      "UnitDisc": 0,
+      "DiscTID": "DINE IN"
+    },
+    {
+      "barcode": "BT0103",
+      "quantity": 1,
+      "UnitPrice": 5.36364,
+      "rate": 5.36364,
+      "discrate": 5.36364,
+      "UnitDisc": 5.36364,
+      "DiscTID": "ENTERTAINER"
+    },
+    {
+      "barcode": "BT0157",
+      "quantity": 1,
+      "UnitPrice": 2,
+      "rate": 2,
+      "discrate": 0,
+      "UnitDisc": 0,
+      "DiscTID": "DINE IN"
+    }
+  ],
+  "payments": [
+    {
+      "POS_PAYCODE": 2,
+      "CARDTYPE": "VISA",
+      "CARDNO": "",
+      "AMOUNT": 24.5
+    }
+  ],
+  "deliveryCharges": [],
+  "posPayCode": 2,
+  "posProfile": "BAIT-SEEF"
+}

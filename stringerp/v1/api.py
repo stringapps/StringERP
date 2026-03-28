@@ -92,7 +92,7 @@ def map_external_to_sales_invoice(external_data):
     mapped = {
         # "customer": external_data.get("firstName"),
         "customer": frappe.db.get_value("Customer", {"custom_customer_code": external_data.get("customercode")}, "name"),
-        "ignore_pricing_rule": 1,
+        # "ignore_pricing_rule": 1,
         "custom_walkin_customer_name": external_data.get("custname"),
         "set_posting_time": 1,
         "posting_date": external_data.get("CRTime", "")[:10],
@@ -132,7 +132,8 @@ def map_external_to_sales_invoice(external_data):
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
             "price_list_rate": flt(item.get("rate", 0)),
-            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
+            "rate": flt(item.get("rate", 0)),
+            "custom_discount_rate": flt(item.get("discrate", 0)),
             "custom_discount_type": item.get("DiscTID")
         })
 
@@ -141,7 +142,8 @@ def map_external_to_sales_invoice(external_data):
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
             "price_list_rate": flt(item.get("rate", 0)),
-            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
+            "rate": flt(item.get("rate", 0)),
+            "custom_discount_rate": flt(item.get("discrate", 0)),
             "custom_discount_type": item.get("DiscTID")
         })
 
