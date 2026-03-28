@@ -36,20 +36,29 @@ class InvoiceClosing(Document):
     def on_submit(self):
         # if self.status != "Stock Entry Created":
         #     frappe.throw("Please create stock entry first")
-        self.submit_stock_entry()
-        self.status = "Stock Entry Submitted"
-
+        # self.submit_stock_entry()
+        # self.status = "Stock Entry Submitted"
+        if self.bom_items and self.status != "Stock Entry Created":
+            frappe.throw("Please create stock entry first")
+        se_status = self.submit_stock_entry()
+        if se_status:
+            frappe.db.sql("UPDATE `tabInvoice Closing` SET status = %s WHERE name = %s", (se_status, self.name))
+            self.reload()
+    
     def submit_stock_entry(self):
         se_list = frappe.db.sql_list("""
             SELECT name FROM `tabStock Entry` WHERE custom_invoice_closing = %s AND docstatus = 0
         """, (self.name))
         if not se_list:
-            frappe.throw("No stock entry found!")
+            # frappe.throw("No stock entry found!")
+            return "Submitted"
+
         for se in se_list:
             try:
                 frappe.get_doc("Stock Entry", se).submit()
             except Exception as e:
                 frappe.throw(str(e))
+        return "Stock Entry Submitted"
 
     @frappe.whitelist()    
     def cancel_invoice(self):
@@ -228,8 +237,9 @@ def create_stock_entry_from_bom_job(
     bom_summary = get_bom_summary(invoice_closing)
 
     if not bom_summary:
-        frappe.throw("No BOM found for this Invoice Closing")
-
+        # frappe.throw("No BOM found for this Invoice Closing")
+        return
+    
     for bom in bom_summary:
         if bom.total_qty==0:
             frappe.log_error(f"BOM {bom.bom} has zero total quantity for invoice closing {invoice_closing}", "Zero Quantity BOM - {0}".format(invoice_closing))

@@ -3,7 +3,7 @@
 
 frappe.ui.form.on("Invoice Closing", {
     refresh(frm) {
-        if(frm.doc.docstatus == 0 & frm.doc.status == "Draft" & !frm.is_new()){
+        if(frm.doc.docstatus === 0 && frm.doc.status === "Draft" && !frm.is_new() && frm.doc.bom_items.length > 0){
             frm.add_custom_button(__('Create Stock Entry from BOM'), function () {
                 frappe.call({
                     method: "stringerp.stringerp.doctype.invoice_closing.invoice_closing.make_stock_entry_from_bom",
@@ -17,7 +17,7 @@ frappe.ui.form.on("Invoice Closing", {
                     }
                 });
             });
-        }else if(frm.doc.docstatus == 1 & frm.doc.status == "Stock Entry Submitted"){
+        }else if(frm.doc.docstatus == 1 & (frm.doc.status == "Stock Entry Submitted" || frm.doc.bom_items.length == 0)){
             frm.add_custom_button(__('Submit Invoice'), function () {
                 frappe.call({
                     method: "submit_invoice",
