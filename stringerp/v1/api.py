@@ -69,10 +69,13 @@ def create_invoice(kwargs):
         doc.update(mapped_data)
     doc.set_taxes()
     # doc.set_missing_values()
-    # doc.calculate_taxes_and_totals()
+    
+    doc.calculate_taxes_and_totals()
     doc.update_stock = 1 
+    
     if kwargs.get("ordertype") == "Debit note":
         doc.is_debit_note = 1
+    
     doc.save(ignore_permissions=True)
 
     invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")
@@ -131,8 +134,8 @@ def map_external_to_sales_invoice(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "price_list_rate": 0,
-            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
+            "price_list_rate": flt(item.get("rate", 0)),
+            "discount_percentage": (flt(item.get("discrate", 0)))/flt(item.get("rate", 0))*100,
             "custom_discount_rate": flt(item.get("discrate", 0)),
             "custom_discount_type": item.get("DiscTID")
         })
@@ -141,8 +144,8 @@ def map_external_to_sales_invoice(external_data):
         mapped["items"].append({
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
-            "price_list_rate": 0,
-            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
+            "price_list_rate": flt(item.get("rate", 0)),
+            "discount_percentage": (flt(item.get("discrate", 0)))/flt(item.get("rate", 0))*100,
             "custom_discount_rate": flt(item.get("discrate", 0)),
             "custom_discount_type": item.get("DiscTID")
         })
