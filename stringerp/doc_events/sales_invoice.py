@@ -7,6 +7,6 @@ def autoname(doc, method=None):
 def validate(doc, method=None):
 	for row in doc.items:
 		if row.custom_discount_rate:
-			row.discount_amount = row.price_list_rate - row.custom_discount_rate
-			row.base_rate = row.rate = row.price_list_rate - row.custom_discount_rate
-			row.base_amount = row.amount = (row.price_list_rate - row.custom_discount_rate) * row.qty
+			row.discount_amount = row.custom_discount_rate
+			# row.base_rate = row.rate = row.price_list_rate - row.custom_discount_rate
+			# row.base_amount = row.amount = (row.price_list_rate - row.custom_discount_rate) * row.qty
