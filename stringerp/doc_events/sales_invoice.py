@@ -5,8 +5,10 @@ def autoname(doc, method=None):
 		doc.name = doc.custom_customer_order_no
 
 def validate(doc, method=None):
-	for row in doc.items:
-		if row.custom_discount_rate:
-			row.discount_amount = row.custom_discount_rate
+	# for row in doc.items:
+	# 	if row.custom_discount_rate:
+	# 		row.discount_amount = row.custom_discount_rate
 			# row.base_rate = row.rate = row.price_list_rate - row.custom_discount_rate
 			# row.base_amount = row.amount = (row.price_list_rate - row.custom_discount_rate) * row.qty
+
+	pass
