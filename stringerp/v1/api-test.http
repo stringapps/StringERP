@@ -23,7 +23,7 @@ Content-Type: application/json
   "phoneNumber": "",
   "address1": "Flat: , Building: , Street: , Block: ",
   "guid": "69bfad62d5aw8d5",
-  "salesmancode": "900",
+  "salesmancode": "461",
   "altPhone": "",
   "deliverymancode": "",
   "customercode": "Walkin Customer",
@@ -65,7 +65,7 @@ Content-Type: application/json
   ],
   "deliveryCharges": [],
   "posPayCode": 2,
-  "posProfile": "ARAD"
+  "posProfile": "TAWOOK-SEEF"
 }
 
 
@@ -80,7 +80,7 @@ Content-Type: application/json
   "phoneNumber": "",
   "address1": "Flat: , Building: , Street: , Block: ",
   "guid": "69bfad62d5awf8d5",
-  "salesmancode": "900",
+  "salesmancode": "461",
   "altPhone": "",
   "deliverymancode": "",
   "customercode": "Walkin Customer",
@@ -132,12 +132,13 @@ Content-Type: application/json
 POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
 Content-Type: application/json
 
-{
+{ "erp_comp_name": "Mesk Holding B.S.C",
+  "zatca_type": "B2C",
   "custname": "",
   "firstName": "Walkin Customer",
   "phoneNumber": "",
   "address1": "Flat: , Building: , Street: , Block: ",
-  "guid": "69bd73e4e400a",
+  "guid": "69bd73se4esdw400a",
   "salesmancode": "553",
   "altPhone": "",
   "deliverymancode": "",
@@ -158,7 +159,7 @@ Content-Type: application/json
   "CRTime": "2026-03-20 21:25:21",
   "Remarks": "",
   "Reupload": 0,
-  "customerOrdernumber": "BTS-2600030",
+  "customerOrdernumber": "BTS-s26s0q00d30",
   "items": [
     {
       "barcode": "BT0023",
