@@ -10,41 +10,138 @@ import datetime
 
 
 class InvoiceClosing(Document):
+    def validate(self):
+        """Refresh invoices, BOM items, and raw materials from DB on every save."""
+        if self.docstatus != 0 or not self.pos_profile:
+            return
+        self._load_invoices_and_bom()
+        self._load_raw_materials()
+
+    def _load_invoices_and_bom(self):
+        """Populate invoices and bom_items child tables by querying available draft invoices."""
+        # Exclude current document's invoices only if no stock entry is linked to it yet
+        exclude_current = not frappe.db.exists(
+            "Stock Entry",
+            {"custom_invoice_closing": self.name, "docstatus": ["!=", 2]}
+        )
+        if exclude_current:
+            prev_used_inv = frappe.db.sql_list("""
+                SELECT DISTINCT ICT.invoice_no
+                FROM `tabInvoice Closing Table` ICT
+                INNER JOIN `tabInvoice Closing` IC ON ICT.parent = IC.name
+                WHERE IC.docstatus != 2 AND IC.name != %s
+            """, (self.name,))
+        else:
+            prev_used_inv = frappe.db.sql_list("""
+                SELECT DISTINCT ICT.invoice_no
+                FROM `tabInvoice Closing Table` ICT
+                INNER JOIN `tabInvoice Closing` IC ON ICT.parent = IC.name
+                WHERE IC.docstatus != 2
+            """)
+
+        inv_filter = {"pos_profile": self.pos_profile, "docstatus": 0}
+        if prev_used_inv:
+            inv_filter["name"] = ["not in", prev_used_inv]
+        if self.invoice_date:
+            inv_filter["posting_date"] = ["=", self.invoice_date]
+
+        invoices = frappe.get_all(
+            "Sales Invoice",
+            filters=inv_filter,
+            fields=["name", "customer", "posting_date", "grand_total", "custom_bill_type"],
+            order_by="posting_date desc"
+        )
+        if not invoices:
+            return
+
+        try:
+            bom_items = get_bom_items(invoices, self.pos_profile)
+        except Exception as e:
+            frappe.log_error(frappe.get_traceback(), "Invoice Closing - BOM Load Error")
+            frappe.throw(_("BOM load error during save: {0}").format(str(e)))
+
+        self.invoices = []
+        self.bom_items = []
+        total_amount = 0
+        for inv in invoices:
+            self.append("invoices", {
+                "invoice_no": inv.name,
+                "date": inv.posting_date,
+                "amount": inv.grand_total,
+                "bill_type": inv.custom_bill_type
+            })
+            total_amount += inv.grand_total
+        self.total_amount = total_amount
+
+        for b in bom_items:
+            self.append("bom_items", {
+                "item_code": b.item_code,
+                "invoice_name": b.parent,
+                "qty": b.qty,
+                "bom": b.bom
+            })
+
+    def _load_raw_materials(self):
+        """Recalculate raw_materials child table from in-memory bom_items."""
+        bom_totals = {}
+        for b in self.bom_items:
+            bom_totals[b.bom] = bom_totals.get(b.bom, 0) + b.qty
+
+        raw_material_summary = {}
+        for bom_name, total_qty in bom_totals.items():
+            for item in frappe.get_all("BOM Item", filters={"parent": bom_name}, fields=["item_code", "qty"]):
+                raw_material_summary[item.item_code] = (
+                    raw_material_summary.get(item.item_code, 0) + item.qty * total_qty
+                )
+
+        warehouse = frappe.db.get_value("POS Profile", self.pos_profile, "warehouse")
+        self.raw_materials = []
+        for item_code, qty in raw_material_summary.items():
+            self.append("raw_materials", {
+                "item_code": item_code,
+                "qty": qty,
+                "stock_qty": get_stock_balance(item_code, warehouse)
+            })
+
     @frappe.whitelist()
     def validate_raw_materials(self):
+        """Recalculate and persist raw materials (kept for backward compatibility)."""
         if self.docstatus != 0:
             return
         bom_summary = get_bom_summary(self.name)
         raw_material_summary = {}
         for bom in bom_summary:
-            raw_material = frappe.get_all("BOM Item", filters={"parent": bom.bom}, fields=["item_code", "qty"])
-            for item in raw_material:
-                if item.item_code in raw_material_summary:
-                    raw_material_summary[item.item_code] += item.qty * bom.total_qty
-                else:
-                    raw_material_summary[item.item_code] = item.qty * bom.total_qty
+            for item in frappe.get_all("BOM Item", filters={"parent": bom.bom}, fields=["item_code", "qty"]):
+                raw_material_summary[item.item_code] = (
+                    raw_material_summary.get(item.item_code, 0) + item.qty * bom.total_qty
+                )
         self.raw_materials = []
         warehouse = frappe.db.get_value("POS Profile", self.pos_profile, "warehouse")
-        for item in raw_material_summary:
+        for item_code, qty in raw_material_summary.items():
             self.append("raw_materials", {
-                "item_code": item,
-                "qty": raw_material_summary[item],
-                "stock_qty": get_stock_balance(item, warehouse)
+                "item_code": item_code,
+                "qty": qty,
+                "stock_qty": get_stock_balance(item_code, warehouse)
             })
-        self.save(ignore_permissions = True)
+        self.save(ignore_permissions=True)
 
     def on_submit(self):
-        # if self.status != "Stock Entry Created":
-        #     frappe.throw("Please create stock entry first")
-        # self.submit_stock_entry()
-        # self.status = "Stock Entry Submitted"
-        if self.bom_items and self.status != "Stock Entry Created":
-            frappe.throw("Please create stock entry first")
-        se_status = self.submit_stock_entry()
-        if se_status:
-            frappe.db.sql("UPDATE `tabInvoice Closing` SET status = %s WHERE name = %s", (se_status, self.name))
-            self.reload()
-    
+        """On submit: create stock entries → submit stock entries → submit invoices."""
+        # Step 1: Create stock entries from BOM synchronously (if any BOM items exist)
+        if self.bom_items:
+            create_stock_entry_from_bom_job(
+                self.name, purpose="Manufacture", target_warehouse=self.warehouse, auto_submit=0
+            )
+            # Step 2: Submit the newly created stock entries
+            self.submit_stock_entry()
+
+        # Step 3: Submit all linked sales invoices
+        for inv in self.invoices:
+            frappe.get_doc("Sales Invoice", inv.invoice_no).submit()
+
+        frappe.db.set_value("Invoice Closing", self.name, "status", "Invoice Submitted")
+        frappe.msgprint(_("Invoices submitted successfully"))
+
     def submit_stock_entry(self):
         se_list = frappe.db.sql_list("""
             SELECT name FROM `tabStock Entry` WHERE custom_invoice_closing = %s AND docstatus = 0
