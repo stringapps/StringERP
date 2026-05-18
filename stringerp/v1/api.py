@@ -6,7 +6,20 @@ from stringerp.v1.utils import api_log, bill_type_map
 from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
 from datetime import date
 
-@frappe.whitelist(allow_guest=True)
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+@frappe.whitelist(allow_guest=False)
 def create_siv(**kwargs):
     try:
         # If API sends JSON body as string, ensure it's parsed
@@ -308,3 +321,99 @@ def create_customer(kwargs):
     customer.tax_category = "Standard VAT"
     customer.insert()
     return customer.name
+
+
+@frappe.whitelist(allow_guest=False)
+def create_invoice_closing(**kwargs):
+    """
+    Create Invoice Closing for a POS Profile and date.
+
+    Required parameters:
+        pos_profile  (str)  – POS Profile name
+        invoice_date (str)  – Date in YYYY-MM-DD format
+        is_submit    (0/1)  – 0: create Invoice Closing only
+                              1: create + stock entries + submit Invoice Closing + submit Sales Invoices
+    """
+    try:
+        if isinstance(kwargs, str):
+            kwargs = frappe.parse_json(kwargs)
+        elif isinstance(kwargs.get("data"), str):
+            kwargs = frappe.parse_json(kwargs.get("data"))
+
+        pos_profile  = kwargs.get("pos_profile")
+        invoice_date = kwargs.get("invoice_date")
+        is_submit    = _as_bool(kwargs.get("is_submit"))
+
+        if not pos_profile:
+            raise Exception(_("pos_profile is required"))
+
+        # Look for an existing non-cancelled Invoice Closing for this POS Profile + date
+        existing_filters = {"pos_profile": pos_profile, "docstatus": ["!=", 2]}
+        if invoice_date:
+            existing_filters["invoice_date"] = invoice_date
+        existing_name = frappe.db.exists("Invoice Closing", existing_filters)
+
+        if existing_name:
+            doc = frappe.get_doc("Invoice Closing", existing_name)
+            if is_submit and doc.docstatus == 0:
+                # Submit the existing draft
+                doc.submit()
+                doc.reload()
+                response = {
+                    "status": "submitted",
+                    "invoice_closing": _ic_summary(doc),
+                }
+                api_log(api="Create Invoice Closing", data=kwargs, response=str(response), status="Success")
+                return response
+            # Already submitted or is_submit=0 — just return it
+            return {
+                "status": "exists",
+                "message": "Invoice Closing already exists for this POS Profile and date",
+                "invoice_closing": _ic_summary(doc),
+            }
+
+        warehouse = frappe.db.get_value("POS Profile", pos_profile, "warehouse")
+
+        # insert triggers is_new so validate skips; save() triggers validate which
+        # auto-populates invoices, bom_items and raw_materials via _load_* methods
+        doc = frappe.new_doc("Invoice Closing")
+        doc.pos_profile  = pos_profile
+        doc.invoice_date = invoice_date
+        doc.date         = invoice_date
+        doc.warehouse    = warehouse
+        doc.insert(ignore_permissions=True)
+        doc.save(ignore_permissions=True)
+        doc.reload()
+
+        if is_submit:
+            # on_submit handles: create stock entries → submit stock entries → submit sales invoices
+            doc.submit()
+            doc.reload()
+        response = {
+            "status": "success",
+            "invoice_closing": _ic_summary(doc),
+        }
+
+        api_log(api="Create Invoice Closing", data=kwargs, response=str(response), status="Success")
+        return response
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Create Invoice Closing Sync Failed")
+        api_log(api="Create Invoice Closing", data=kwargs, response="", status="Failed", error=e)
+        return {"status": "error", "message": str(e)}
+
+
+def _ic_summary(doc):
+    return {
+        "name":               doc.name,
+        "docstatus":          doc.docstatus,
+        "status":             doc.status,
+        "pos_profile":        doc.pos_profile,
+        "warehouse":          doc.warehouse,
+        "invoice_date":       doc.invoice_date,
+        "total_amount":       doc.total_amount,
+        "invoice_count":      len(doc.invoices),
+        "bom_count":          len(doc.bom_items),
+        "raw_material_count": len(doc.raw_materials),
+    }
+

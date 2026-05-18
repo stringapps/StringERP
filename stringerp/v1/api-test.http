@@ -237,3 +237,28 @@ Content-Type: application/json
   "posPayCode": 2,
   "posProfile": "BAIT-SEEF"
 }
+
+
+### Create Invoice Closing (Draft only)
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_invoice_closing
+Content-Type: application/json
+Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+
+{
+  "pos_profile": "BAIT-SEEF",
+  "invoice_date": "2026-05-17",
+  "is_submit": 0
+}
+
+
+### Create Invoice Closing - Full Flow
+### (create stock entries → submit Invoice Closing → submit Sales Invoices)
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_invoice_closing
+Content-Type: application/json
+Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+
+{
+  "pos_profile": "TAWOOK-SEEF",
+  "invoice_date": "2026-05-17",
+  "is_submit": 1
+}
