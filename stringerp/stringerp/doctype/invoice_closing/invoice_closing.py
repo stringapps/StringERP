@@ -351,6 +351,7 @@ def create_stock_entry_from_bom_job(
         stock_entry.from_bom = 1
         stock_entry.bom_no = bom_doc.name
         stock_entry.use_multi_level_bom = 1
+        
         stock_entry.fg_completed_qty = bom.total_qty or 1
         stock_entry.set_posting_time = True
         posting_date, posting_time = get_posting_time_from_invoice(invoice_closing)
