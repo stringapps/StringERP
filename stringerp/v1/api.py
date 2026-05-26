@@ -107,8 +107,8 @@ def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
     mapped = {
         # "customer": external_data.get("firstName"),
-        "company": external_data.get("erp_comp_name"),
-        "custom_invoice_type": external_data.get("zatca_type"),
+        # "company": external_data.get("erp_comp_name"),
+        # "custom_invoice_type": external_data.get("zatca_type"),
         "customer": frappe.db.get_value("Customer", {"custom_customer_code": external_data.get("customercode")}, "name"),
         "ignore_pricing_rule": 1,
         "custom_walkin_customer_name": external_data.get("custname"),
