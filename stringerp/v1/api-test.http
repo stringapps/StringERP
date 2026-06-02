@@ -131,6 +131,7 @@ Content-Type: application/json
 ### Test Create SIV API (POST) with multiple items and discounts
 POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
 Content-Type: application/json
+Authorization: token 038eba622b38867:144cbeda79eff68
 
 { "erp_comp_name": "Mesk Holding B.S.C",
   "zatca_type": "B2C",
@@ -242,7 +243,7 @@ Content-Type: application/json
 ### Create Invoice Closing (Draft only)
 POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_invoice_closing
 Content-Type: application/json
-Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+Authorization: token 038eba622b38867:144cbeda79eff68
 
 {
   "pos_profile": "BAIT-SEEF",
@@ -255,10 +256,20 @@ Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
 ### (create stock entries → submit Invoice Closing → submit Sales Invoices)
 POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_invoice_closing
 Content-Type: application/json
-Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+Authorization: token 038eba622b38867:144cbeda79eff68
 
 {
   "pos_profile": "TAWOOK-SEEF",
   "invoice_date": "2026-05-17",
   "is_submit": 1
+}
+
+
+#### Delete Invoice Closing (for testing purposes)
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.delete_invoice_closing
+Content-Type: application/json
+Authorization: token 038eba622b38867:144cbeda79eff68
+
+{
+  "guid_ref": "69bd73se4esdw400a"
 }

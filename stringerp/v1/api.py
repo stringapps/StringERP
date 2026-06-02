@@ -107,6 +107,8 @@ def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
     mapped = {
         # "customer": external_data.get("firstName"),
+        "custom_return_against_additional_references": external_data.get("return_ref"),
+        "custom_return_reason": external_data.get("return_reason"),
         "company": external_data.get("erp_comp_name"),
         "custom_invoice_type": external_data.get("zatca_type"),
         "customer": frappe.db.get_value("Customer", {"custom_customer_code": external_data.get("customercode")}, "name"),
@@ -417,3 +419,28 @@ def _ic_summary(doc):
         "raw_material_count": len(doc.raw_materials),
     }
 
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_sales_invoice(guid_ref):
+    try:
+        if not guid_ref:
+            raise Exception(_("GUID reference is required"))
+
+        invoice_name = frappe.db.get_value("Sales Invoice", {"custom_guid": guid_ref})
+        if not invoice_name:
+            raise Exception(_("No Sales Invoice found with the provided GUID reference"))
+
+        invoice = frappe.get_doc("Sales Invoice", invoice_name)
+        if invoice.docstatus == 1:
+            raise Exception(_("Cannot delete a submitted Sales Invoice"))
+
+        invoice.delete()
+        response = {"status": "success", "message": _("Sales Invoice deleted successfully")}
+        api_log(api="Delete Sales Invoice", data={"guid_ref": guid_ref}, response=str(response), status="Success")
+        return response
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Delete Sales Invoice Sync Failed")
+        api_log(api="Delete Sales Invoice", data={"guid_ref": guid_ref}, response="", status="Failed", error=e)
+        return {"status": "error", "message": str(e)}
