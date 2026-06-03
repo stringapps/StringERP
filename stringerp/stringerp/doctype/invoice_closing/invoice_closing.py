@@ -126,26 +126,37 @@ class InvoiceClosing(Document):
         self.save(ignore_permissions=True)
 
     def on_submit(self):
-        """On submit: create stock entries → submit stock entries → submit invoices."""
-        # Step 1: Create stock entries from BOM synchronously (if any BOM items exist)
-        if self.bom_items:
-            create_stock_entry_from_bom_job(
-                self.name, purpose="Manufacture", target_warehouse=self.warehouse, auto_submit=0
-            )
-            # Step 2: Submit the newly created stock entries
-            self.submit_stock_entry()
+        """Queue the heavy submission work to a background job.
 
-        # Step 3: Submit all linked sales invoices
-        for inv in self.invoices:
-            frappe.get_doc("Sales Invoice", inv.invoice_no).submit()
+        Creating/submitting stock entries and submitting every linked sales
+        invoice is far too much work to run inside the submit transaction: it
+        holds the ``FOR UPDATE`` lock on this row for the whole duration and
+        causes ``Lock wait timeout exceeded`` on any concurrent/retried submit.
+        We instead enqueue a single idempotent job that runs *after* this
+        transaction commits, so the row lock is released immediately.
+        """
+        # Re-entrancy guard: never queue the same closing twice.
+        if self.status in ("Submission Queued", "Submission In Progress", "Invoice Submitted"):
+            return
 
-        frappe.db.set_value("Invoice Closing", self.name, "status", "Invoice Submitted")
-        frappe.msgprint(_("Invoices submitted successfully"))
+        self.db_set("status", "Submission Queued")
+        frappe.enqueue(
+            "stringerp.stringerp.doctype.invoice_closing.invoice_closing.process_submission_job",
+            invoice_closing=self.name,
+            queue="long",
+            timeout=1800,
+            enqueue_after_commit=True,  # only run once the submit transaction commits
+            job_id=f"invoice_closing_submit::{self.name}",
+            deduplicate=True,
+        )
+        frappe.msgprint(
+            _("Submission queued. Stock entries and invoices are being processed in the background.")
+        )
 
     def submit_stock_entry(self):
         se_list = frappe.db.sql_list("""
             SELECT name FROM `tabStock Entry` WHERE custom_invoice_closing = %s AND docstatus = 0
-        """, (self.name))
+        """, (self.name,))
         if not se_list:
             # frappe.throw("No stock entry found!")
             return "Submitted"
@@ -174,6 +185,54 @@ class InvoiceClosing(Document):
 
     def on_cancel(self):
         self.cancel_invoice()
+
+
+def process_submission_job(invoice_closing):
+    """Background job that performs the actual Invoice Closing submission.
+
+    Idempotent and safe to re-run: it skips stock entries / invoices that are
+    already submitted, and commits incrementally so a failure part-way through
+    leaves durable progress and short-lived row locks (no giant transaction).
+    """
+    doc = frappe.get_doc("Invoice Closing", invoice_closing)
+
+    # Only process a submitted closing that hasn't already finished.
+    if doc.docstatus != 1 or doc.status == "Invoice Submitted":
+        return
+
+    try:
+        doc.db_set("status", "Submission In Progress")
+
+        # Step 1: create stock entries from BOM (internally guarded against
+        # duplicates) and submit any that are still in draft.
+        if doc.bom_items:
+            create_stock_entry_from_bom_job(
+                invoice_closing,
+                purpose="Manufacture",
+                target_warehouse=doc.warehouse,
+                auto_submit=0,
+            )
+            doc.submit_stock_entry()
+
+        # Step 2: submit each linked sales invoice, skipping ones already
+        # submitted. Commit per invoice to keep locks short-lived.
+        for inv in doc.invoices:
+            docstatus = frappe.db.get_value("Sales Invoice", inv.invoice_no, "docstatus")
+            if docstatus == 0:
+                frappe.get_doc("Sales Invoice", inv.invoice_no).submit()
+
+        doc.db_set("status", "Invoice Submitted")
+        frappe.logger("invoice_closing_submit").info(
+            f"Invoice Closing {invoice_closing} submitted successfully."
+        )
+    except Exception:
+        frappe.db.rollback()
+        frappe.db.set_value("Invoice Closing", invoice_closing, "status", "Submission Failed")
+        frappe.log_error(
+            frappe.get_traceback(),
+            f"Invoice Closing Submission Failed - {invoice_closing}",
+        )
+        raise
 
 def get_bom_summary(invoice_closing):
     bom_summary = frappe.db.sql("""
@@ -424,7 +483,6 @@ def cancel_and_amend_sales_invoice(invoice_name):
         doc.custom_guid = ""
         doc.custom_customer_order_no = ""
         doc.cancel()
-        frappe.db.commit()
         frappe.logger("sales_invoice_amend").info(
             f"Invoice {invoice_name} cancelled successfully.")
 
@@ -445,7 +503,6 @@ def cancel_and_amend_sales_invoice(invoice_name):
                 "base_amount": pm.base_amount
             })
         new_doc.save(ignore_permissions=True)
-        frappe.db.commit()
 
         frappe.logger("sales_invoice_amend").info(
             f"Amended invoice created: {new_doc.name}")

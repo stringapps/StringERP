@@ -266,7 +266,7 @@ Authorization: token 038eba622b38867:144cbeda79eff68
 
 
 #### Delete Invoice Closing (for testing purposes)
-POST http://127.0.0.1:8002/api/method/stringerp.v1.api.delete_invoice_closing
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.delete_sales_invoice
 Content-Type: application/json
 Authorization: token 038eba622b38867:144cbeda79eff68
 

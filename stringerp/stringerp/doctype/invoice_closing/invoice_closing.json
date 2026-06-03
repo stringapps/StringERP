@@ -113,7 +113,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Draft\nStock Entry Created\nStock Entry Submitted\nInvoice Submitted\nInvoice Cancelled\nCancelled",
+   "options": "Draft\nSubmission Queued\nSubmission In Progress\nStock Entry Created\nStock Entry Submitted\nInvoice Submitted\nSubmission Failed\nInvoice Cancelled\nCancelled",
    "read_only": 1
   },
   {
