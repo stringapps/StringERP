@@ -105,9 +105,14 @@ def create_invoice(kwargs):
 
 def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
+
+    return_ref = external_data.get("return_ref")
+    return_references = []
+    if return_ref:
+        return_references.append({"sales_invoice": return_ref})
     mapped = {
         # "customer": external_data.get("firstName"),
-        "custom_return_against_additional_references": external_data.get("return_ref"),
+        "custom_return_against_additional_references": return_references,
         "custom_return_reason": external_data.get("return_reason"),
         "company": external_data.get("erp_comp_name"),
         "custom_invoice_type": external_data.get("zatca_type"),
