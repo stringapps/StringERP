@@ -91,6 +91,13 @@ def create_invoice(kwargs):
     
     doc.save(ignore_permissions=True)
 
+    # Set return references after the first save so the link can validate even
+    # when return_ref is the same as this invoice's own name.
+    return_ref = kwargs.get("return_ref")
+    if return_ref:
+        doc.set("custom_return_against_additional_references", [{"sales_invoice": return_ref}])
+        doc.save(ignore_permissions=True)
+
     invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")
     invoice.items = frappe.db.get_all("Sales Invoice Item", {"parent": doc.name}, "*")
     invoice.payments = frappe.db.get_all("Sales Invoice Payment", {"parent": doc.name}, "*")
@@ -106,13 +113,7 @@ def create_invoice(kwargs):
 def map_external_to_sales_invoice(external_data):
     """Map incoming external POS data to ERPNext Sales Invoice format"""
 
-    return_ref = external_data.get("return_ref")
-    return_references = []
-    if return_ref:
-        return_references.append({"sales_invoice": return_ref})
     mapped = {
-        # "customer": external_data.get("firstName"),
-        "custom_return_against_additional_references": return_references,
         "custom_return_reason": external_data.get("return_reason"),
         "company": external_data.get("erp_comp_name"),
         "custom_invoice_type": external_data.get("zatca_type"),
