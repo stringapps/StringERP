@@ -336,7 +336,7 @@ def create_stock_entry_from_bom_job(
     if not bom_summary:
         # frappe.throw("No BOM found for this Invoice Closing")
         return
-    
+    company = frappe.db.get_value("POS Profile", ic_doc.pos_profile, "company")
     for bom in bom_summary:
         if bom.total_qty==0:
             frappe.log_error(f"BOM {bom.bom} has zero total quantity for invoice closing {invoice_closing}", "Zero Quantity BOM - {0}".format(invoice_closing))
@@ -345,8 +345,8 @@ def create_stock_entry_from_bom_job(
             frappe.log_error(f"Stock Entry already exists for BOM {bom.bom} against invoice closing {invoice_closing}", "Stock Entry Duplication - {0}".format(invoice_closing))
             continue
         bom_doc = frappe.get_doc("BOM", bom.bom)
-    
         stock_entry = frappe.new_doc("Stock Entry")
+        stock_entry.company = company
         stock_entry.purpose = purpose
         stock_entry.from_bom = 1
         stock_entry.bom_no = bom_doc.name
