@@ -307,7 +307,9 @@ def map_external_to_sales_order(external_data):
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
             "price_list_rate": flt(item.get("rate", 0)),
-            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
+            "discount_percentage": (flt(item.get("UnitDisc", 0)))/flt(item.get("UnitPrice", 0))*100 if flt(item.get("UnitPrice", 0)) else 0,
+            "custom_discount_rate": flt(item.get("UnitDisc", 0)),
+            "custom_discount_type": item.get("DiscTID")
         })
 
     for item in external_data.get("deliveryCharges", []):
@@ -315,7 +317,9 @@ def map_external_to_sales_order(external_data):
             "item_code": item.get("barcode"),
             "qty": flt(item.get("quantity", 1)),
             "price_list_rate": flt(item.get("rate", 0)),
-            "rate": flt(item.get("rate", 0))-flt(item.get("discrate", 0)),
+            "discount_percentage": (flt(item.get("UnitDisc", 0)))/flt(item.get("UnitPrice", 0))*100 if flt(item.get("UnitPrice", 0)) else 0,
+            "custom_discount_rate": flt(item.get("UnitDisc", 0)),
+            "custom_discount_type": item.get("DiscTID")
         })
 
     if external_data.get("salesmancode"):
