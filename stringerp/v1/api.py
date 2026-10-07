@@ -130,7 +130,7 @@ def map_external_to_sales_invoice(external_data):
         "grand_total": flt(external_data.get("nettotalwithVAT", 0)),
         "total": flt(external_data.get("subtotal", 0)),
         # Additional discount, deducted from the grand total (after taxes)
-        "apply_discount_on": "Grand Total",
+        "apply_discount_on": "Net Total",
         "discount_amount": flt(external_data.get("discountAmount", 0)),
         "custom_walkin_customer_alt_phone": external_data.get("altPhone") or "",
         "custom_walkin_customer_phone": external_data.get("phoneNumber") or "",
