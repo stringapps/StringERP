@@ -240,6 +240,36 @@ Authorization: token 038eba622b38867:144cbeda79eff68
 }
 
 
+### Test Create Sales Order API (POST) with item discount
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
+Content-Type: application/json
+Authorization: token 038eba622b38867:144cbeda79eff68
+
+{
+  "firstName": "Walkin Customer",
+  "address1": "Flat: , Building: , Street: , Block: ",
+  "guid": "so-test-disc-001",
+  "salesmancode": "461",
+  "ordertype": "Order",
+  "SubTotalDiscount": 0,
+  "ispaid": 0,
+  "CRTime": "2026-10-01 11:50:42",
+  "Remarks": "",
+  "customerOrdernumber": "SO-TEST-DISC-001",
+  "items": [
+    {
+      "barcode": "258",
+      "quantity": 2,
+      "UnitPrice": 10,
+      "rate": 10,
+      "UnitDisc": 1,
+      "DiscTID": "DINE IN"
+    }
+  ],
+  "deliveryCharges": []
+}
+
+
 ### Create Invoice Closing (Draft only)
 POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_invoice_closing
 Content-Type: application/json
