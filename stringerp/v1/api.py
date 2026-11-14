@@ -274,18 +274,67 @@ def create_sord(kwargs):
     doc.insert(ignore_permissions=True)
     doc.submit()
 
-    payment = {}
-    if kwargs.get("ispaid"):
-        pe_doc = get_payment_entry(dt="Sales Order", dn=doc.name)
-        pe_doc.reference_no = doc.name
-        pe_doc.reference_date = doc.transaction_date
-        pe_doc.insert()
-        pe_doc.submit()
-        payment = pe_doc.as_dict()
+    payments = create_sales_order_payments(doc, kwargs)
 
-    response = {"status": "success", "order": doc, "payment": payment}
+    response = {
+        "status": "success",
+        "order": doc,
+        "payment": payments[0] if len(payments) == 1 else payments,
+        "paid_amount": sum(flt(p.get("paid_amount")) for p in payments),
+        "outstanding_amount": flt(doc.grand_total) - sum(flt(p.get("paid_amount")) for p in payments),
+    }
     api_log(api="Create Sales Order", data=kwargs, response=str(response), status="Success")
     return response
+
+def create_sales_order_payments(so_doc, kwargs):
+    """
+    Create advance Payment Entries against a submitted Sales Order.
+
+    - Each line in kwargs["payments"] (AMOUNT / CARDTYPE / CARDNO) becomes its own
+      Payment Entry, so partial advances (e.g. 500 paid on a 1000 order) are supported.
+    - Total of payment lines is capped at the order's grand total.
+    - If "ispaid" is set and no payment lines are sent, the full order amount is paid (old behaviour).
+    """
+    from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
+
+    payment_lines = [p for p in (kwargs.get("payments") or []) if flt(p.get("AMOUNT")) > 0]
+
+    if not payment_lines:
+        if not kwargs.get("ispaid"):
+            return []
+        payment_lines = [{"AMOUNT": so_doc.grand_total, "CARDTYPE": None, "CARDNO": None}]
+
+    total_requested = sum(flt(p.get("AMOUNT")) for p in payment_lines)
+    if total_requested > flt(so_doc.grand_total):
+        raise Exception(
+            "Payment amount {0} exceeds Sales Order total {1}".format(total_requested, so_doc.grand_total)
+        )
+
+    created = []
+    for pay in payment_lines:
+        amount = flt(pay.get("AMOUNT"))
+        pe_doc = get_payment_entry(dt="Sales Order", dn=so_doc.name, party_amount=amount)
+
+        mode_of_payment = pay.get("CARDTYPE")
+        if mode_of_payment:
+            pe_doc.mode_of_payment = mode_of_payment
+            account = get_bank_cash_account(mode_of_payment, so_doc.company).get("account")
+            if account:
+                pe_doc.paid_to = account
+
+        pe_doc.paid_amount = amount
+        pe_doc.received_amount = amount
+        for ref in pe_doc.references:
+            ref.allocated_amount = amount
+
+        pe_doc.reference_no = pay.get("CARDNO") or so_doc.name
+        pe_doc.reference_date = so_doc.transaction_date
+        pe_doc.insert()
+        pe_doc.submit()
+        created.append(pe_doc.as_dict())
+
+    return created
+
 
 def map_external_to_sales_order(external_data):
     mapped = {
