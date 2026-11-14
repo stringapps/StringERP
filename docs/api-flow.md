@@ -1,251 +1,565 @@
-# Sales Sync API: Flow Documentation
+# Sales Sync API
 
-Source: [`stringerp/v1/api.py`](../stringerp/v1/api.py)
+Source: [`stringerp/v1/api.py`](../stringerp/v1/api.py) · Tests: [`stringerp/v1/test_api.py`](../stringerp/v1/test_api.py) · Ready-made requests: [`stringerp/v1/api-test.http`](../stringerp/v1/api-test.http)
 
-This API takes orders and invoices from an external POS system and creates the matching ERPNext documents. A single endpoint receives every request and routes it by `ordertype`.
+This API connects the external POS to ERPNext. The POS sends invoices and orders, takes advance payments, cancels orders, pays refunds, and closes the day.
 
-```
-POST /api/method/stringerp.v1.api.create_siv
-```
-
-Authentication is required (`allow_guest=False`). Use token auth: `Authorization: token <api_key>:<api_secret>`.
-
----
-
-## 1. Routing: `create_siv`
-
-```mermaid
-flowchart TD
-    A[POST create_siv] --> B{Body is a JSON string<br/>or has a 'data' string?}
-    B -- yes --> C[frappe.parse_json]
-    B -- no --> D{ordertype}
-    C --> D
-    D -- "Invoice" --> INV[create_invoice]
-    D -- "Debit note" --> INV
-    D -- "Order" --> SO[create_sord]
-    D -- other --> E[raise 'Invalid ordertype']
-    INV --> OK["{status: success, ...}"]
-    SO --> OK
-    E --> ERR
-    INV -. exception .-> ERR["Error Log + API Log (Failed)<br/>{status: error, message}"]
-    SO -. exception .-> ERR
-```
-
-| `ordertype` | Handler | Result |
+| # | Endpoint | What it does |
 |---|---|---|
-| `Invoice` | `create_invoice` | Draft Sales Invoice |
-| `Debit note` | `create_invoice` | Draft Sales Invoice with `is_debit_note = 1` |
-| `Order` | `create_sord` | Submitted Sales Order, plus a Payment Entry when paid |
-
-> Errors come back with **HTTP 200** and `{"status": "error", "message": "..."}`. Clients must check `status` and not rely on the HTTP code.
+| 1 | [`create_siv`](#1-create_siv--sales-invoice-debit-note-sales-order) | Creates a Sales Invoice, Debit Note or Sales Order (with advance payments) |
+| 2 | [`cancel_sales_order`](#2-cancel_sales_order) | Cancels a Sales Order and all of its payments |
+| 3 | [`refund_sales_order`](#3-refund_sales_order) | Pays money back to the customer of a cancelled Sales Order |
+| 4 | [`create_invoice_closing`](#4-create_invoice_closing) | Day-end closing for a POS profile: collects and submits the day's invoices |
+| 5 | [`get_customer_details`](#5-get_customer_details) | Reads one customer |
 
 ---
 
-## 2. Sales Invoice flow: `create_invoice`
+## Basics
 
-```mermaid
-flowchart TD
-    S[create_invoice] --> V1{customercode present?}
-    V1 -- no --> X1[Error: Customer code is missing]
-    V1 -- yes --> V2{Customer with<br/>custom_customer_code exists?}
-    V2 -- no --> X2[Error: Customer ... is missing]
-    V2 -- yes --> M[map_external_to_sales_invoice]
+### URL and authentication
 
-    subgraph MAP [Mapping]
-      M --> M1[Header fields, is_pos = 1]
-      M1 --> M2[items + deliveryCharges → items]
-      M2 --> M3{salesmancode?}
-      M3 -- yes --> M4{Sales Person with<br/>custom_sales_person_code?}
-      M4 -- no --> X3[Error: Sales Person missing]
-      M4 -- yes --> M5[sales_team 100%]
-      M3 -- no --> M6
-      M5 --> M6{ispaid?}
-      M6 -- yes --> M7[payments from 'payments' list]
-      M6 -- no --> MR[mapped data]
-      M7 --> MR
-    end
-
-    MR --> D1{Reupload?}
-    D1 -- yes --> D2{Draft SI with this guid?}
-    D2 -- yes --> U[Load draft + overwrite]
-    D2 -- no --> X4[Error: No draft invoice found]
-    D1 -- no --> D3{SI with guid exists?}
-    D3 -- yes --> X5[Error: Invoice already exists]
-    D3 -- no --> D4{SI with customerOrdernumber exists?}
-    D4 -- yes --> X6[Error: Order already exists]
-    D4 -- no --> N[New Sales Invoice]
-
-    U --> T[set_taxes → calculate_taxes_and_totals<br/>update_stock = 1]
-    N --> T
-    T --> DN{Debit note?}
-    DN -- yes --> DN1[is_debit_note = 1]
-    DN -- no --> SV
-    DN1 --> SV[save → DRAFT, docstatus 0]
-    SV --> R[Read back SI, items, payments, taxes]
-    R --> L[API Log: Success] --> RET["{status: success, invoice}"]
+```
+POST https://<your-site>/api/method/stringerp.v1.api.<endpoint>
+Content-Type: application/json
+Authorization: token <api_key>:<api_secret>
 ```
 
-### Lifecycle
+All endpoints require a logged-in API user (guest access is off). Send the body as JSON. A body wrapped in a `data` string (`{"data": "{...}"}`) is also accepted.
 
-The invoice is saved as a **draft only**. It is submitted later by `create_invoice_closing` with `is_submit = 1`. Invoice Closing `on_submit` creates and submits the stock entries, then submits the Sales Invoices.
+### Responses and status codes
+
+Frappe wraps every response in a `message` key. Every response body has a `status` field.
+
+```json
+{ "message": { "status": "success", ... } }
+{ "message": { "status": "error", "message": "Sales Order SAL-ORD-2026-00099 not found" } }
+```
+
+| HTTP | Meaning | Example |
+|---|---|---|
+| `200` | Success | Order created |
+| `403` | The API user lacks permission | Cannot read this customer |
+| `404` | The record was not found | Unknown `sales_order` / `guid` |
+| `409` | Another request changed the same record at the same moment. **Retry.** | Two refunds for one order at once |
+| `417` | The request breaks a business rule | Duplicate guid, overpayment, refund too large |
+
+### Safety guarantees
+
+- **All or nothing.** If any step fails, everything that request wrote is undone. Example: an order whose second payment fails leaves no order and no payment behind, so it can be retried with the same `guid`.
+- **No duplicates.** A `guid` or `customerOrdernumber` that already exists is rejected, even if two identical requests arrive at the same time.
+- **Every call is logged** in the **API Call Log** doctype. Failures also create an **Error Log** entry with the full traceback.
+
+---
+
+## 1. `create_siv` · Sales Invoice, Debit Note, Sales Order
+
+One endpoint for all three documents. `ordertype` decides which one is created.
+
+| `ordertype` | Creates | State after the call |
+|---|---|---|
+| `Invoice` | Sales Invoice (POS, updates stock) | **Draft.** It is submitted at day end by `create_invoice_closing`. |
+| `Debit note` | Sales Invoice with `is_debit_note = 1` | Draft |
+| `Order` | Sales Order, plus one Payment Entry per payment line | **Submitted**, payments submitted |
+
+### Request body
+
+This is the POS client format. All keys are shown; the ones marked *Order* or *Invoice* are only used for that type.
+
+```json
+{
+  "ordertype": "Invoice",
+  "guid": "69bfad62d5aw8d5",
+  "customerOrdernumber": "BTS-242600162",
+  "customercode": "Walkin Customer",
+  "firstName": "Walkin Customer",
+  "custname": "",
+  "phoneNumber": "",
+  "altPhone": "",
+  "address1": "Flat: , Building: , Street: , Block: ",
+  "salesmancode": "461",
+  "deliverymancode": "",
+  "onlineOrderId": "",
+  "salestype": "DI",
+  "posProfile": "TAWOOK-SEEF",
+  "CRTime": "2026-03-22 11:50:42",
+  "billDate": "2026-03-22 11:50:42",
+  "tableno": "INDOOR T2-A",
+  "noOfPax": "1",
+  "Remarks": "",
+  "Reupload": 0,
+  "ispaid": 1,
+  "subtotal": 2,
+  "SubTotalDiscount": 0.2,
+  "shipping": 0,
+  "nettotal": 1.8,
+  "VATAmount": 0.18,
+  "nettotalwithVAT": 1.98,
+  "posPayCode": 2,
+  "items": [
+    {
+      "barcode": "258",
+      "quantity": 1,
+      "UnitPrice": 2,
+      "rate": 2,
+      "discrate": 0.2,
+      "UnitDisc": 0.2,
+      "DiscTID": "DINE IN"
+    }
+  ],
+  "deliveryCharges": [],
+  "payments": [
+    { "POS_PAYCODE": 2, "CARDTYPE": "CASH", "CARDNO": "", "AMOUNT": 1.98 }
+  ]
+}
+```
+
+### Field reference
+
+**Header**
+
+| Key | Required | Used for | Maps to |
+|---|---|---|---|
+| `ordertype` | ✅ | Both | `Invoice`, `Debit note` or `Order` |
+| `guid` | Recommended | Both | `custom_guid`. Unique per document; the duplicate check uses it. |
+| `customerOrdernumber` | Recommended | Both | `custom_customer_order_no`. Unique per document. |
+| `customercode` | ✅ Invoice; recommended for Order | Both | Customer found by `custom_customer_code`. It must exist. |
+| `firstName` | Order without `customercode` | Order | Walk-in fallback: customer found by name, **created** if missing |
+| `salesmancode` | Optional | Both | Sales Person found by `custom_sales_person_code`. It must exist. |
+| `CRTime` | ✅ | Both | `posting_date` + `posting_time` (Invoice), `transaction_date` + `delivery_date` (Order; today if missing). Format `YYYY-MM-DD HH:MM:SS`. |
+| `billDate` | Invoice | Invoice | `due_date` |
+| `posProfile` | Invoice | Invoice | `pos_profile` |
+| `ispaid` | Optional | Both | Invoice: reads `payments[]` into the invoice. Order: pays the full total when no payment lines are sent. |
+| `Reupload` | Optional | Invoice | `1` replaces an existing **draft** invoice that has the same `guid` |
+| `salestype` | Optional | Invoice | `custom_bill_type`: `DI` Dine In, `HD` Home Delivery, `TK` Take Away, `ON` Online, `OT` Others |
+| `custname`, `phoneNumber`, `altPhone`, `address1` | Optional | Invoice (Order: `address1` only) | Walk-in customer fields |
+| `deliverymancode`, `tableno`, `noOfPax`, `onlineOrderId`, `Remarks` | Optional | Invoice (Order: `Remarks` only) | Matching `custom_*` fields |
+| `discountAmount`, `additionalDiscountGL` | Optional | Invoice | Additional discount on Net Total, and its account |
+| `SubTotalDiscount` | Optional | Order | `discount_amount` |
+| `subtotal`, `nettotal`, `VATAmount`, `nettotalwithVAT`, `shipping`, `posPayCode` | – | – | Informational only. ERPNext recalculates totals from the items and taxes. |
+
+**`items[]` and `deliveryCharges[]`**: each row becomes one line.
+
+| Key | Maps to |
+|---|---|
+| `barcode` | `item_code` (must be an existing Item) |
+| `quantity` | `qty` (default 1) |
+| `rate` | `price_list_rate` |
+| `UnitDisc` ÷ `UnitPrice` × 100 | `discount_percentage` |
+| `UnitDisc` | `custom_discount_rate` |
+| `DiscTID` | `custom_discount_type` (must exist in **Discount Type**) |
+
+**`payments[]`**
+
+| Key | Invoice | Order |
+|---|---|---|
+| `CARDTYPE` | Mode of Payment on the invoice (default `Cash`) | Mode of Payment of the Payment Entry; money goes to that mode's default account |
+| `AMOUNT` | Amount | Amount of that Payment Entry. The total may not exceed the order total. |
+| `CARDNO` | Reference no. | Reference no. (default: the order name) |
+
+### Sales Order payments
+
+Each payment line becomes **its own Payment Entry** against the order.
+
+| You send | Result |
+|---|---|
+| No payment lines, `ispaid: 0` | Order only, nothing paid |
+| No payment lines, `ispaid: 1` | One Payment Entry for the **full** order total |
+| One line equal to the total | Fully paid |
+| One line **less** than the total (e.g. 500 of 1035) | **Partial advance**. `outstanding_amount` is the rest. |
+| Several lines (e.g. 300 CASH + 200 VISA) | One Payment Entry per line, each into its own account |
+| Lines adding up to more than the total | Rejected (417); nothing is created |
+
+```mermaid
+flowchart LR
+    A[create_siv<br/>ordertype=Order] --> B[Find customer<br/>check duplicates]
+    B --> C[Sales Order<br/>submitted]
+    C --> D{payment lines?}
+    D -- none, ispaid=0 --> E[done]
+    D -- none, ispaid=1 --> F[1 Payment Entry<br/>full total]
+    D -- 1..n lines --> G[1 Payment Entry<br/>per line]
+    F --> E
+    G --> E
+```
+
+### Examples
+
+**Sales Invoice, paid in cash**
+
+Request (abbreviated; send the full body above):
+```json
+{
+  "ordertype": "Invoice",
+  "guid": "INV-0001",
+  "customerOrdernumber": "BTS-0001",
+  "customercode": "Walkin Customer",
+  "salesmancode": "461",
+  "posProfile": "TAWOOK-SEEF",
+  "CRTime": "2026-11-14 10:00:00",
+  "billDate": "2026-11-14 10:00:00",
+  "ispaid": 1,
+  "items": [{ "barcode": "BT0023", "quantity": 1, "UnitPrice": 1000, "rate": 1000, "UnitDisc": 100, "DiscTID": "DINE IN" }],
+  "deliveryCharges": [],
+  "payments": [{ "CARDTYPE": "CASH", "CARDNO": "", "AMOUNT": 1035 }]
+}
+```
+
+Response `200`:
+```json
+{
+  "message": {
+    "status": "success",
+    "invoice": {
+      "name": "BTS-0001",
+      "docstatus": 0,
+      "customer": "Walkin Customer",
+      "posting_date": "2026-11-14",
+      "pos_profile": "TAWOOK-SEEF",
+      "custom_guid": "INV-0001",
+      "net_total": 900.0,
+      "total_taxes_and_charges": 135.0,
+      "grand_total": 1035.0,
+      "items": [{ "item_code": "BT0023", "qty": 1.0, "price_list_rate": 1000.0, "discount_percentage": 10.0, "rate": 900.0 }],
+      "payments": [{ "mode_of_payment": "CASH", "amount": 1035.0 }],
+      "taxes": [{ "account_head": "VAT 15%", "tax_amount": 135.0 }]
+    }
+  }
+}
+```
+`invoice` holds every Sales Invoice field and its child tables. Only the main ones are shown here.
+
+**Sales Order with a partial advance of 500**
+
+Request:
+```json
+{
+  "ordertype": "Order",
+  "guid": "SO-0001",
+  "customerOrdernumber": "BTS-SO-0001",
+  "customercode": "Walkin Customer",
+  "salesmancode": "461",
+  "CRTime": "2026-11-14 10:00:00",
+  "ispaid": 0,
+  "items": [{ "barcode": "BT0023", "quantity": 1, "UnitPrice": 1000, "rate": 1000, "UnitDisc": 100, "DiscTID": "DINE IN" }],
+  "deliveryCharges": [],
+  "payments": [{ "CARDTYPE": "CASH", "CARDNO": "", "AMOUNT": 500 }]
+}
+```
+
+Response `200`:
+```json
+{
+  "message": {
+    "status": "success",
+    "order": { "name": "SAL-ORD-2026-00012", "docstatus": 1, "customer": "Walkin Customer", "grand_total": 1035.0, "status": "To Deliver and Bill" },
+    "payment": { "name": "ACC-PAY-2026-00031", "payment_type": "Receive", "mode_of_payment": "CASH", "paid_amount": 500.0, "paid_to": "Cash - MH", "docstatus": 1 },
+    "paid_amount": 500.0,
+    "outstanding_amount": 535.0
+  }
+}
+```
+
+**Sales Order, split payment (300 CASH + 200 VISA):** `payment` becomes a **list**, with one entry per line.
+```json
+{
+  "message": {
+    "status": "success",
+    "order": { "name": "SAL-ORD-2026-00013", "grand_total": 1035.0 },
+    "payment": [
+      { "name": "ACC-PAY-2026-00032", "mode_of_payment": "CASH", "paid_amount": 300.0 },
+      { "name": "ACC-PAY-2026-00033", "mode_of_payment": "VISA", "paid_amount": 200.0 }
+    ],
+    "paid_amount": 500.0,
+    "outstanding_amount": 535.0
+  }
+}
+```
+`payment` is `[]` when nothing is paid, a single object for one payment, and a list for two or more.
+
+**Errors**
+
+| HTTP | `message` |
+|---|---|
+| 417 | `Invalid ordertype` |
+| 417 | `Customer code is missing` / `Customer with customer code X is missing` |
+| 417 | `Sales Person 461 is missing` |
+| 417 | `Invoice already exists with GUID: ...` / `Order already exists with GUID: ...` |
+| 417 | `Order already exists with Customer Order No: ...` |
+| 417 | `Reupload: No draft invoice found with GUID: ...` |
+| 417 | `Payment amount 99999.0 exceeds Sales Order total 1035.0` |
+| 409 | `Another request changed the same records at the same time. Please retry.` |
+
+---
+
+## 2. `cancel_sales_order`
+
+Cancels a submitted Sales Order and **every** Payment Entry received against it, in one step.
+
+### Request
+
+Send **one** of these keys to identify the order:
+
+| Key | Example |
+|---|---|
+| `sales_order` | `"SAL-ORD-2026-00012"` |
+| `guid` | `"SO-0001"` |
+| `customerOrdernumber` | `"BTS-SO-0001"` |
+
+```json
+{ "customerOrdernumber": "BTS-SO-0001" }
+```
+
+### Response `200`
+
+```json
+{
+  "message": {
+    "status": "success",
+    "message": "Sales Order SAL-ORD-2026-00012 cancelled",
+    "sales_order": "SAL-ORD-2026-00012",
+    "cancelled_payments": [
+      { "name": "ACC-PAY-2026-00031", "paid_amount": 500.0, "mode_of_payment": "CASH" }
+    ]
+  }
+}
+```
+
+### When it refuses
+
+Nothing is cancelled when any of these apply:
+
+| HTTP | `message` | What to do |
+|---|---|---|
+| 404 | `Sales Order X not found` / `No Sales Order found with guid: X` | Check the identifier |
+| 417 | `Send one of: sales_order, guid, customerOrdernumber` | Add an identifier |
+| 417 | `Sales Order X is already cancelled` | Nothing; it is already done |
+| 417 | `Sales Order X is a draft and cannot be cancelled` | – |
+| 417 | `Cannot cancel Sales Order X; cancel these first: Sales Invoice ..., Delivery Note ...` | Cancel the invoice or delivery made from the order first |
+| 417 | `Payment Entry X is also allocated to ...; cancel it manually` | That payment also covers other documents; an accountant must handle it |
+
+---
+
+## 3. `refund_sales_order`
+
+Pays money back to the customer of a **cancelled** Sales Order. Use it when the refund is less than what was paid, for example a cancellation fee is kept.
+
+```mermaid
+sequenceDiagram
+    participant POS
+    participant API
+    POS->>API: create_siv (Order, paid 500)
+    API-->>POS: SO + Payment Entry (Receive 500)
+    POS->>API: cancel_sales_order
+    API-->>POS: SO + Payment Entry cancelled
+    POS->>API: refund_sales_order (refund_amount 400)
+    API-->>POS: New Payment Entry (Pay 400 to customer), deduction 100
+```
+
+### Request
+
+| Key | Required | Description |
+|---|---|---|
+| `sales_order` / `guid` / `customerOrdernumber` | ✅ (one of) | The cancelled order |
+| `refund_amount` | ✅ | Amount paid back. Must be more than 0 and no more than what is still refundable. |
+| `mode_of_payment` | Optional | Pays out from this mode's default account. Default: the company's cash account. |
+| `reference_no` | Optional | Cheque, card or transaction number. Default: the order name. |
+
+```json
+{
+  "customerOrdernumber": "BTS-SO-0001",
+  "refund_amount": 400,
+  "mode_of_payment": "CASH",
+  "reference_no": ""
+}
+```
+
+**Refundable amount** = what the customer paid on the order (its cancelled payments) − refunds already made against it. Several partial refunds are allowed up to that limit.
+
+### Response `200`
+
+```json
+{
+  "message": {
+    "status": "success",
+    "message": "Refund of 400.0 paid to Walkin Customer",
+    "sales_order": "SAL-ORD-2026-00012",
+    "customer": "Walkin Customer",
+    "payment_entry": "ACC-PAY-2026-00034",
+    "refund_amount": 400.0,
+    "paid_on_order": 500.0,
+    "deduction": 100.0
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `payment_entry` | The new submitted Payment Entry (type **Pay**, party = the customer) |
+| `paid_on_order` | What the customer originally paid on the order |
+| `deduction` | What is left after this refund (e.g. kept as a cancellation fee) |
+
+The refund Payment Entry stores the order in **Refund Against Sales Order** (`custom_refund_against_sales_order`).
+
+### When it refuses
+
+| HTTP | `message` |
+|---|---|
+| 404 | `Sales Order X not found` / `No Sales Order found with ...` |
+| 417 | `Sales Order X is not cancelled; cancel it before refunding` |
+| 417 | `refund_amount must be greater than 0` |
+| 417 | `No cancelled payment found for Sales Order X; nothing to refund` |
+| 417 | `Refund 200.0 exceeds refundable amount 100.0 (paid 500.0, already refunded 400.0)` |
+| 409 | `Another request changed the same records at the same time. Please retry.` |
+
+> **Accounting note.** The original receipt is cancelled, so after a refund ERPNext shows the customer as **owing** the refunded amount, and the amount kept is not booked as income. Agree with your accountant on a journal entry or adjustment for this.
+
+---
+
+## 4. `create_invoice_closing`
+
+Day-end closing for one POS profile. It collects that day's draft invoices and, when `is_submit = 1`, creates and submits the stock entries and submits the invoices.
+
+### Request
+
+| Key | Required | Description |
+|---|---|---|
+| `pos_profile` | ✅ | POS Profile name |
+| `invoice_date` | ✅ | `YYYY-MM-DD` |
+| `is_submit` | Optional | `0` (default): create a draft closing. `1`: also submit it, which creates stock entries and submits the invoices. |
+
+```json
+{ "pos_profile": "TAWOOK-SEEF", "invoice_date": "2026-11-14", "is_submit": 0 }
+```
+
+### Responses
+
+The `status` value tells you what happened:
+
+| `status` | When |
+|---|---|
+| `success` | A new closing was created (and submitted, if `is_submit = 1`) |
+| `exists` | A closing for this profile and date already exists; it is returned unchanged |
+| `submitted` | An existing **draft** closing was submitted (`is_submit = 1`) |
+
+```json
+{
+  "message": {
+    "status": "success",
+    "invoice_closing": {
+      "name": "INV-CLOS-11-14-00153",
+      "docstatus": 0,
+      "status": "Draft",
+      "pos_profile": "TAWOOK-SEEF",
+      "warehouse": "Stores - MH",
+      "invoice_date": "2026-11-14",
+      "total_amount": 4255.0,
+      "invoice_count": 5,
+      "bom_count": 0,
+      "raw_material_count": 0
+    }
+  }
+}
+```
+
+```json
+{
+  "message": {
+    "status": "exists",
+    "message": "Invoice Closing already exists for this POS Profile and date",
+    "invoice_closing": { "name": "INV-CLOS-11-14-00153", "docstatus": 0, "status": "Draft", "invoice_count": 5 }
+  }
+}
+```
+
+Typical day:
 
 ```mermaid
 sequenceDiagram
     participant POS
     participant API as create_siv
     participant IC as create_invoice_closing
-    POS->>API: ordertype=Invoice (many times during the day)
-    API-->>POS: Draft Sales Invoice
+    POS->>API: ordertype=Invoice (all day)
+    API-->>POS: Draft invoices
     POS->>API: Reupload=1, same guid (optional correction)
     API-->>POS: Draft updated
+    POS->>IC: is_submit=0 (optional preview)
+    IC-->>POS: Draft closing with totals
     POS->>IC: is_submit=1 (end of day)
-    IC->>IC: Create + submit stock entries
-    IC->>IC: Submit Sales Invoices
-    IC-->>POS: Closing summary
+    IC->>IC: Stock entries + submit invoices
+    IC-->>POS: status submitted
 ```
 
-### Field mapping (Sales Invoice)
-
-| Payload field | Sales Invoice field |
-|---|---|
-| `customercode` | `customer` (looked up by `custom_customer_code`) |
-| `custname` | `custom_walkin_customer_name` |
-| `CRTime` (`YYYY-MM-DD HH:MM:SS`) | `posting_date` (first 10 chars) / `posting_time` (from char 12) |
-| `billDate` | `due_date` |
-| `Remarks` | `remarks`, `custom_order_remarks` |
-| `customerOrdernumber` | `custom_customer_order_no` |
-| `guid` | `custom_guid` |
-| `ispaid` | `is_paid` |
-| `discountAmount` | `discount_amount` (applied on Net Total) |
-| `additionalDiscountGL` | `additional_discount_account` |
-| `phoneNumber` / `altPhone` / `address1` | `custom_walkin_customer_phone` / `_alt_phone` / `_address` |
-| `deliverymancode` | `custom_delivery_man` |
-| `posProfile` | `pos_profile` |
-| `salestype` | `custom_bill_type` (via `bill_type_map`) |
-| `noOfPax` / `tableno` | `custom_no_of_pax` / `custom_table_no` |
-| `onlineOrderId` | `custom_online_order_id` |
-| `salesmancode` | `sales_team[0].sales_person` (looked up by `custom_sales_person_code`) |
-
-Each entry in **`items[]` and `deliveryCharges[]`** becomes one invoice item:
-
-| Payload | Item field |
-|---|---|
-| `barcode` | `item_code` |
-| `quantity` | `qty` (default 1) |
-| `rate` | `price_list_rate` |
-| `UnitDisc / UnitPrice × 100` | `discount_percentage` |
-| `UnitDisc` | `custom_discount_rate` |
-| `DiscTID` | `custom_discount_type` |
-
-Each entry in **`payments[]`** (only read when `ispaid` is set):
-
-| Payload | Payment field |
-|---|---|
-| `CARDTYPE` | `mode_of_payment` (default `Cash`) |
-| `AMOUNT` | `amount` |
-| `CARDNO` | `reference_no` |
+**Errors:** `417 pos_profile is required`, plus any validation error raised while submitting (stock, ZATCA, etc.). Nothing is kept when submitting fails.
 
 ---
 
-## 3. Sales Order flow: `create_sord`
+## 5. `get_customer_details`
 
-```mermaid
-flowchart TD
-    S[create_sord] --> D1{SO with guid exists?}
-    D1 -- yes --> X1[Error: Order already exists with GUID]
-    D1 -- no --> D2{SO with customerOrdernumber exists?}
-    D2 -- yes --> X2[Error: Order already exists]
-    D2 -- no --> C{Customer named firstName exists?}
-    C -- no --> CC[create_customer<br/>name = firstName<br/>tax_category = Standard VAT]
-    C -- yes --> M
-    CC --> M[map_external_to_sales_order]
-    M --> I[Sales Order: insert → SUBMIT]
-    I --> P{ispaid?}
-    P -- yes --> PE[get_payment_entry from SO<br/>reference_no = SO name<br/>insert → SUBMIT]
-    P -- no --> R
-    PE --> R[API Log: Success]
-    R --> RET["{status: success, order, payment}"]
+```
+GET /api/method/stringerp.v1.api.get_customer_details?customer_id=Walkin%20Customer
 ```
 
-### Field mapping (Sales Order)
+Response `200`:
+```json
+{
+  "message": {
+    "status": "success",
+    "message": "Customer fetched successfully",
+    "data": {
+      "name": "Walkin Customer",
+      "customer_name": "Walkin Customer",
+      "customer_group": "Individual",
+      "territory": "All Territories",
+      "mobile_no": null,
+      "email_id": null
+    }
+  }
+}
+```
 
-| Payload field | Sales Order field |
+| HTTP | `message` |
 |---|---|
-| `firstName` | `customer` (used as the Customer **name**, created if missing) |
-| `address1` | `custom_walkin_customer_address` |
-| `CRTime` | `transaction_date` and `delivery_date` (today if missing) |
-| `Remarks` | `remarks` |
-| `customerOrdernumber` | `custom_customer_order_no` |
-| `guid` | `custom_guid` |
-| `SubTotalDiscount` | `discount_amount` |
-| `salesmancode` | `sales_team[0].sales_person` (used as the name directly) |
-| `items[]`, `deliveryCharges[]` | `items` (same mapping as the invoice) |
+| 400 | `Missing required parameter: customer_id` |
+| 404 | `Customer not found` |
+| 403 | `You do not have permission to access this resource.` |
 
 ---
 
-## 4. Invoice vs. Order at a glance
+## Master data the site needs
 
-| | Sales Invoice | Sales Order |
+The API looks these up and rejects the request if they are missing:
+
+| What | Where | Used by |
 |---|---|---|
-| Customer key | `customercode` → `custom_customer_code` (must exist) | `firstName` = Customer name (created automatically) |
-| Sales person | Looked up by `custom_sales_person_code` | Raw `salesmancode` used as the name |
-| Duplicate checks | `guid`, `customerOrdernumber`; `Reupload` updates a draft | `guid`, `customerOrdernumber` |
-| Final state | Draft (submitted by Invoice Closing) | Submitted |
-| Stock | `update_stock = 1` | None (no stock until delivery) |
-| Payment | POS `payments` table on the invoice | Separate submitted Payment Entry |
-| Discount field | `discountAmount` | `SubTotalDiscount` |
+| Customer with **Customer Code** (`custom_customer_code`) | Customer | `customercode` |
+| Sales Person with **Sales Person Code** (`custom_sales_person_code`) | Sales Person | `salesmancode` |
+| Item for each `barcode` | Item | `items[]`, `deliveryCharges[]` |
+| Mode of Payment for each `CARDTYPE`, with a default account for the company | Mode of Payment | `payments[]`, refunds |
+| Every `DiscTID` value (e.g. `DINE IN`, `ENTERTAINER`) | Discount Type | `items[].DiscTID` |
+| POS Profile with its payment modes | POS Profile | `posProfile`, Invoice Closing |
+
+The app's custom fields (guid, customer order no, walk-in fields, refund link, …) come from `fixtures/custom_field.json` and are installed by `bench migrate`.
 
 ---
 
-## 5. Example requests
+## Running the tests
 
-**Invoice**
-```json
-{
-  "ordertype": "Invoice",
-  "guid": "7f3c...",
-  "customercode": "C001",
-  "custname": "Walk-in",
-  "CRTime": "2026-11-13 14:05:00",
-  "billDate": "2026-11-13",
-  "customerOrdernumber": "POS-1001",
-  "salesmancode": "S01",
-  "posProfile": "Main POS",
-  "ispaid": 1,
-  "discountAmount": 0,
-  "items": [{"barcode": "ITEM-001", "quantity": 2, "rate": 10, "UnitPrice": 10, "UnitDisc": 1, "DiscTID": "PCT"}],
-  "deliveryCharges": [],
-  "payments": [{"CARDTYPE": "Cash", "AMOUNT": 18, "CARDNO": ""}]
-}
+```bash
+bench --site <site> set-config allow_tests true
+bench --site <site> set-config --parse stringerp_test '{
+  "customer": "<customer name>", "customer_code": "<its customer code>",
+  "item": "<item code with stock>", "mode_of_payment": "<mode>",
+  "mode_of_payment_2": "<second mode>", "company": "<company>"
+}'
+bench --site <site> run-tests --module stringerp.v1.test_api
 ```
 
-**Order**
-```json
-{
-  "ordertype": "Order",
-  "guid": "a91b...",
-  "firstName": "John Doe",
-  "CRTime": "2026-11-13 14:05:00",
-  "customerOrdernumber": "WEB-2001",
-  "ispaid": 1,
-  "SubTotalDiscount": 0,
-  "items": [{"barcode": "ITEM-001", "quantity": 1, "rate": 25}]
-}
-```
-
-**Success response:** `{"status": "success", "invoice": {...}}` or `{"status": "success", "order": {...}, "payment": {...}}`
-**Error response:** `{"status": "error", "message": "Invoice already exists with GUID: ..."}`
-
-Every call is recorded in the **API Log** doctype. Failures also create an **Error Log** entry.
+The order-flow tests skip themselves when `stringerp_test` is not set. Each test is rolled back, so no data is left behind.
 
 ---
 
-## 6. Known issues
+## Known limitations
 
-1. **No rollback on error.** Exceptions are caught and returned as a normal response, so changes made before the failure are committed. Example: the Sales Order is submitted, the Payment Entry fails, and the client gets `error`. A retry is then rejected as a duplicate guid. Auto-created Customers also stay saved. *Fix:* call `frappe.db.rollback()` in the `except` block.
-2. **Errors are logged under the wrong name.** `order_type` is assigned after the handler returns, so failures are always logged as "Create Sales" / "Sync Failed".
-3. **`Reupload` and `ispaid` use truthiness checks.** The strings `"0"` and `"false"` count as true. *Fix:* use `_as_bool`.
-4. **The Sales Order uses the raw `salesmancode`** as the Sales Person name. The invoice flow resolves it through `custom_sales_person_code`.
-5. **`payments` is set on the Sales Order mapping**, but it isn't a Sales Order field.
-6. **Debit notes** have no `return_against` and no duplicate check of their own.
-7. **`CRTime` is not validated.** A value with no time part gives an empty `posting_time`. For orders, a missing `CRTime` silently falls back to today.
+1. **`Reupload` and `ispaid` are read as true for any non-empty value.** Send `0` or leave them out for "no"; the strings `"0"` and `"false"` count as true.
+2. **Debit notes** have no `return_against` and no duplicate check of their own.
+3. **Invoice line discounts:** `discount_percentage` is calculated from `UnitPrice` but applied to `rate`. When the two differ, the discount is applied to a different price than the one it was worked out from.
+4. **Refund accounting** (see the note under `refund_sales_order`).
