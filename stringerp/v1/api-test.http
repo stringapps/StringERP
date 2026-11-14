@@ -262,3 +262,66 @@ Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
   "invoice_date": "2026-05-17",
   "is_submit": 1
 }
+
+### Create Sales Order with partial advance payment (500 of total)
+### Each payments[] line becomes its own Payment Entry. Omit payments and set ispaid=1 to pay in full.
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
+Content-Type: application/json
+Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+
+{
+  "firstName": "Walkin Customer",
+  "customercode": "Walkin Customer",
+  "address1": "",
+  "guid": "SO-TEST-0001",
+  "salesmancode": "",
+  "ordertype": "Order",
+  "SubTotalDiscount": 0,
+  "ispaid": 0,
+  "CRTime": "2026-11-14 10:00:00",
+  "Remarks": "",
+  "customerOrdernumber": "BTS-SO-0001",
+  "items": [
+    {
+      "barcode": "BT0023",
+      "quantity": 10,
+      "UnitPrice": 100,
+      "rate": 100,
+      "UnitDisc": 0,
+      "DiscTID": "DINE IN"
+    }
+  ],
+  "payments": [
+    { "CARDTYPE": "CASH", "CARDNO": "", "AMOUNT": 300 },
+    { "CARDTYPE": "VISA", "CARDNO": "4111", "AMOUNT": 200 }
+  ],
+  "deliveryCharges": []
+}
+
+
+### Cancel Sales Order (also cancels its linked Payment Entries)
+### Send ONE of: sales_order | guid | customerOrdernumber
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.cancel_sales_order
+Content-Type: application/json
+Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+
+{
+  "customerOrdernumber": "BTS-SO-0001"
+}
+
+
+### Refund a cancelled Sales Order (new "Pay" Payment Entry to the customer)
+### Send ONE of: sales_order | guid | customerOrdernumber
+### refund_amount: required, > 0, max = amount paid on the order minus earlier refunds
+### mode_of_payment: optional (default: company cash account)
+### reference_no: optional (default: Sales Order name)
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.refund_sales_order
+Content-Type: application/json
+Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+
+{
+  "customerOrdernumber": "BTS-SO-0001",
+  "refund_amount": 400,
+  "mode_of_payment": "CASH",
+  "reference_no": ""
+}
