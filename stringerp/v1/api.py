@@ -149,6 +149,18 @@ def _resolve_order_customer(kwargs):
 	return create_customer(kwargs)
 
 
+def _resolve_company(external_data):
+	"""Company from erp_comp_name, else from the POS Profile."""
+	company = external_data.get("erp_comp_name")
+	if not company and external_data.get("posProfile"):
+		company = frappe.db.get_value("POS Profile", external_data.get("posProfile"), "company")
+	if not company:
+		raise frappe.ValidationError(_("Company is required: send erp_comp_name or a valid posProfile"))
+	if not frappe.db.exists("Company", company):
+		raise frappe.ValidationError(_("Company {0} does not exist").format(company))
+	return company
+
+
 def _sales_team(salesman_code):
 	"""Sales team rows for a POS salesman code (Sales Person.custom_sales_person_code)."""
 	if not salesman_code:
@@ -260,7 +272,7 @@ def map_external_to_sales_invoice(external_data):
 	"""
 	mapped = {
 		"custom_return_reason": external_data.get("return_reason"),
-		"company": external_data.get("erp_comp_name"),
+		"company": _resolve_company(external_data),
 		"custom_invoice_type": external_data.get("zatca_type"),
 		"customer": frappe.db.get_value(
 			"Customer", {"custom_customer_code": external_data.get("customercode")}, "name"
@@ -389,6 +401,7 @@ def map_external_to_sales_order(external_data):
 	order_date = _date_part(external_data.get("CRTime")) or date.today()
 	# customer is set by create_sord (see _resolve_order_customer)
 	return {
+		"company": _resolve_company(external_data),
 		"custom_walkin_customer_address": external_data.get("address1") or "",
 		"transaction_date": order_date,
 		"delivery_date": order_date,
