@@ -400,19 +400,39 @@ def create_sales_order_payments(so_doc, kwargs):
 def map_external_to_sales_order(external_data):
 	order_date = _date_part(external_data.get("CRTime")) or date.today()
 	# customer is set by create_sord (see _resolve_order_customer)
+	company = _resolve_company(external_data)
+	warehouse = _resolve_order_warehouse(external_data, company)
+	items = _map_items(external_data)
+	for item in items:
+		item["warehouse"] = warehouse
 	return {
-		"company": _resolve_company(external_data),
+		"company": company,
+		"set_warehouse": warehouse,
 		"custom_walkin_customer_address": external_data.get("address1") or "",
 		"transaction_date": order_date,
 		"delivery_date": order_date,
 		"remarks": external_data.get("Remarks"),
 		"custom_customer_order_no": external_data.get("customerOrdernumber"),
-		"items": _map_items(external_data),
+		"items": items,
 		"discount_amount": flt(external_data.get("SubTotalDiscount", 0)),
 		"custom_guid": external_data.get("guid") or "",
 		"disable_rounded_total": True,
 		"sales_team": _sales_team(external_data.get("salesmancode")),
 	}
+
+
+def _resolve_order_warehouse(external_data, company):
+	"""Source warehouse for a Sales Order: payload "warehouse", else the POS Profile's warehouse."""
+	warehouse = external_data.get("warehouse")
+	if not warehouse and external_data.get("posProfile"):
+		warehouse = frappe.db.get_value("POS Profile", external_data.get("posProfile"), "warehouse")
+	if not warehouse:
+		raise frappe.ValidationError(_("Warehouse is required: send warehouse or a valid posProfile"))
+	if frappe.db.get_value("Warehouse", warehouse, "company") != company:
+		raise frappe.ValidationError(
+			_("Warehouse {0} does not belong to company {1}").format(warehouse, company)
+		)
+	return warehouse
 
 
 def create_customer(kwargs):

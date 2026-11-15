@@ -9,7 +9,8 @@ site config, skipping when it is not set:
 		"item": "PM003",
 		"mode_of_payment": "Cash",
 		"mode_of_payment_2": "CARD - Van Sale-DRY",
-		"company": "Mashriq Al Dahbiya Trading Company - DRY"
+		"company": "Mashriq Al Dahbiya Trading Company - DRY",
+		"pos_profile": "Mashriq Al Dahbiya Trading Company - DRY"
 	}'
 	bench --site <site> run-tests --module stringerp.v1.test_api
 
@@ -130,6 +131,7 @@ class TestSalesOrderFlow(FrappeTestCase):
 			"ordertype": "Order",
 			"ispaid": ispaid,
 			"CRTime": now()[:19],
+			"posProfile": self.cfg.get("pos_profile"),
 			"items": [{"barcode": self.cfg.item, "quantity": 1, "UnitPrice": 1000, "rate": 1000}],
 			"payments": payments or [],
 		}
@@ -143,6 +145,40 @@ class TestSalesOrderFlow(FrappeTestCase):
 		r = self.create()
 		self.assertEqual(r["paid_amount"], 0)
 		self.assertEqual(r["outstanding_amount"], flt(r["order"].grand_total))
+
+	def test_order_warehouse_from_pos_profile(self):
+		r = self.create()
+		wh = frappe.db.get_value("POS Profile", self.cfg.pos_profile, "warehouse")
+		self.assertEqual(r["order"].set_warehouse, wh)
+		self.assertTrue(all(i.warehouse == wh for i in r["order"].items))
+
+	def test_order_explicit_warehouse_wins(self):
+		wh = frappe.db.get_value(
+			"Warehouse", {"company": self.cfg.company, "is_group": 0, "name": ["!=", frappe.db.get_value("POS Profile", self.cfg.pos_profile, "warehouse")]}, "name"
+		)
+		kw = self.order()
+		kw["warehouse"] = wh
+		r = api.create_siv(**kw)
+		self.assertEqual(r["status"], "success", r.get("message"))
+		self.assertTrue(all(i.warehouse == wh for i in r["order"].items))
+
+	def test_order_without_warehouse_fails(self):
+		kw = self.order()
+		kw.pop("posProfile")
+		kw["erp_comp_name"] = self.cfg.company
+		r = api.create_siv(**kw)
+		self.assertEqual(r["status"], "error")
+		self.assertIn("Warehouse is required", r["message"])
+
+	def test_order_warehouse_wrong_company_fails(self):
+		wh = frappe.db.get_value("Warehouse", {"company": ["!=", self.cfg.company], "is_group": 0}, "name")
+		if not wh:
+			self.skipTest("no warehouse in another company")
+		kw = self.order()
+		kw["warehouse"] = wh
+		r = api.create_siv(**kw)
+		self.assertEqual(r["status"], "error")
+		self.assertIn("does not belong", r["message"])
 
 	def test_full_payment_without_lines(self):
 		r = self.create(ispaid=1)
