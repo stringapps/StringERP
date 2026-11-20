@@ -1,7 +1,8 @@
 """Sales sync API used by the external POS.
 
 Endpoints (all POST, token auth):
-	create_siv              - Sales Invoice / Debit Note / Sales Order (+ advance payments)
+	create_siv              - Sales Invoice / Debit Note / Sales Order (+ advance payments);
+	                          an invoice with "soName" is linked to that Sales Order
 	cancel_sales_order      - cancel a Sales Order and its Payment Entries
 	refund_sales_order      - pay a refund to the customer of a cancelled Sales Order
 	create_invoice_closing  - create / submit an Invoice Closing for a POS Profile and date
@@ -241,12 +242,23 @@ def create_invoice(kwargs):
 		doc = frappe.new_doc("Sales Invoice")
 
 	doc.update(mapped_data)
+	sales_order = _link_sales_order(doc, kwargs)
 	doc.set_taxes()
 	doc.calculate_taxes_and_totals()
 	doc.update_stock = 1
 	if kwargs.get("ordertype") == "Debit note":
 		doc.is_debit_note = 1
 	doc.save(ignore_permissions=True)
+	if sales_order:
+		# Same as ERPNext's make_sales_invoice: pull the order's advance Payment Entries.
+		# ERPNext skips auto-allocation for POS invoices, so do it explicitly. Done after the
+		# first save, because taxes are only applied there and allocation is capped at the total.
+		doc.set_advances()
+		if not doc.payments:
+			# ERPNext won't submit a POS invoice without a payment row, even when the
+			# order's advances cover it in full; add the POS Profile's default mode at 0.
+			doc.append("payments", {"mode_of_payment": _default_mode_of_payment(doc.pos_profile), "amount": 0})
+		doc.save(ignore_permissions=True)
 
 	invoice = frappe.db.get_value("Sales Invoice", doc.name, "*")
 	invoice.items = frappe.db.get_all("Sales Invoice Item", {"parent": doc.name}, "*")
@@ -256,6 +268,82 @@ def create_invoice(kwargs):
 	response = {"status": "success", "invoice": invoice}
 	api_log(api="Create Sales Invoice", data=kwargs, response=str(response), status="Success")
 	return response
+
+
+def _default_mode_of_payment(pos_profile):
+	modes = frappe.get_all(
+		"POS Payment Method",
+		filters={"parent": pos_profile, "parenttype": "POS Profile"},
+		fields=["mode_of_payment", "default"],
+		order_by="`default` desc, idx asc",
+		limit=1,
+	)
+	if not modes:
+		raise frappe.ValidationError(_("POS Profile {0} has no mode of payment").format(pos_profile))
+	return modes[0].mode_of_payment
+
+
+def _find_order_for_invoice(doc, kwargs):
+	"""Sales Order named in payload "soName", or None for an independent invoice."""
+	so_name = kwargs.get("soName")
+	if not so_name:
+		return None
+	so = frappe.db.get_value("Sales Order", so_name, ["docstatus", "customer"], as_dict=True)
+	if not so:
+		raise frappe.DoesNotExistError(_("Sales Order {0} not found").format(so_name))
+	if so.docstatus != 1:
+		raise frappe.ValidationError(_("Sales Order {0} is not submitted").format(so_name))
+	if so.customer != doc.customer:
+		raise frappe.ValidationError(
+			_("Sales Order {0} belongs to customer {1}, not {2}").format(so_name, so.customer, doc.customer)
+		)
+	return so_name
+
+
+def _link_sales_order(doc, kwargs):
+	"""Link invoice items to their Sales Order rows (sales_order / so_detail), as ERPNext's
+	"Create > Sales Invoice" from a Sales Order does. This makes ERPNext update the order's
+	billed % / status on submit and lets set_advances() find the order's advance payments.
+
+	Each invoice item is matched by item_code to an order row that still has unbilled qty
+	(qty already on non-cancelled invoices is excluded). Items with no match stay unlinked.
+	"""
+	so_name = _find_order_for_invoice(doc, kwargs)
+	if not so_name:
+		return None
+	_lock("Sales Order", so_name)
+	so = frappe.get_doc("Sales Order", so_name)
+	if so.status == "Closed" or so.per_billed >= 100:
+		raise frappe.ValidationError(_("Sales Order {0} is already fully billed or closed").format(so.name))
+
+	billed = {
+		r.so_detail: flt(r.qty)
+		for r in frappe.db.sql(
+			"""select sii.so_detail, sum(sii.qty) as qty
+			from `tabSales Invoice Item` sii join `tabSales Invoice` si on si.name = sii.parent
+			where sii.sales_order = %(so)s and si.docstatus < 2 and si.name != %(si)s
+			group by sii.so_detail""",
+			{"so": so.name, "si": doc.name or ""},
+			as_dict=True,
+		)
+	}
+	remaining = {row.name: flt(row.qty) - billed.get(row.name, 0) for row in so.items}
+
+	linked = False
+	for item in doc.items:
+		for row in so.items:
+			if row.item_code == item.item_code and remaining[row.name] > 0:
+				item.sales_order = so.name
+				item.so_detail = row.name
+				remaining[row.name] -= flt(item.qty)
+				linked = True
+				break
+
+	if not linked:
+		raise frappe.ValidationError(
+			_("No invoice item matches an unbilled item of Sales Order {0}").format(so.name)
+		)
+	return so.name
 
 
 def map_external_to_sales_invoice(external_data):

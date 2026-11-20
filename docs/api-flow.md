@@ -129,6 +129,7 @@ This is the POS client format. All keys are shown; the ones marked *Order* or *I
 | `billDate` | Invoice | Invoice | `due_date` |
 | `posProfile` | Invoice | Invoice | `pos_profile` |
 | `ispaid` | Optional | Both | Invoice: reads `payments[]` into the invoice. Order: pays the full total when no payment lines are sent. |
+| `soName` | Optional | Invoice | Name of the Sales Order this invoice bills (e.g. `SAL-ORD-2026-00012`). Links the invoice to the order and applies the order's advance payments. Leave it out for an independent invoice. See [Invoicing a Sales Order](#invoicing-a-sales-order-soname). |
 | `Reupload` | Optional | Invoice | `1` replaces an existing **draft** invoice that has the same `guid` |
 | `salestype` | Optional | Invoice | `custom_bill_type`: `DI` Dine In, `HD` Home Delivery, `TK` Take Away, `ON` Online, `OT` Others |
 | `custname`, `phoneNumber`, `altPhone`, `address1` | Optional | Invoice (Order: `address1` only) | Walk-in customer fields |
@@ -180,6 +181,71 @@ flowchart LR
     F --> E
     G --> E
 ```
+
+### Invoicing a Sales Order (`soName`)
+
+To bill an order created earlier with `ordertype: Order`, send `ordertype: Invoice` with **`soName`** set to the order name returned in `order.name`. Without `soName`, the invoice is independent, the same as before.
+
+The invoice is linked the same way as ERPNext's **Sales Order → Create → Sales Invoice**:
+
+| What happens | Details |
+|---|---|
+| Items are linked to the order | Each invoice item is matched by `barcode` to an order line that still has unbilled qty, and gets `sales_order` + `so_detail`. Qty already on other non-cancelled invoices (drafts included) is not billed again. Items with no match stay unlinked. |
+| Advances are applied | Payment Entries taken on the order (full or partial) are added to the invoice's **Advance Payments** table, up to the invoice total (VAT included). |
+| `payments[]` is the balance only | Send only what the customer pays now: invoice total − advance. When the advance covers everything, send no payment lines; a 0-amount line with the POS Profile's default mode is added automatically. |
+| On submit (Invoice Closing) | The advance Payment Entry is reconciled to the invoice (outstanding becomes 0) and the order's **% Billed** and status update. |
+| Partial billing | An order can be billed by several invoices (e.g. qty 2 → two invoices of qty 1). |
+
+```mermaid
+sequenceDiagram
+    participant POS
+    participant API as create_siv
+    participant IC as create_invoice_closing
+    POS->>API: ordertype=Order, payments 500
+    API-->>POS: order.name = SAL-ORD-2026-00012
+    POS->>API: ordertype=Invoice, soName=SAL-ORD-2026-00012, payments = balance
+    API-->>POS: Draft invoice, items linked, advance 500
+    POS->>IC: is_submit=1
+    IC-->>POS: Invoice submitted: advance reconciled, order 100% billed
+```
+
+Request (abbreviated):
+```json
+{
+  "ordertype": "Invoice",
+  "soName": "SAL-ORD-2026-00012",
+  "guid": "INV-0002",
+  "customerOrdernumber": "BTS-0002",
+  "customercode": "Walkin Customer",
+  "posProfile": "TAWOOK-SEEF",
+  "CRTime": "2026-11-15 10:00:00",
+  "billDate": "2026-11-15 10:00:00",
+  "ispaid": 1,
+  "items": [{ "barcode": "BT0023", "quantity": 1, "UnitPrice": 1000, "rate": 1000, "UnitDisc": 100, "DiscTID": "DINE IN" }],
+  "deliveryCharges": [],
+  "payments": [{ "CARDTYPE": "CASH", "CARDNO": "", "AMOUNT": 535 }]
+}
+```
+
+Response `200` (main fields):
+```json
+{
+  "message": {
+    "status": "success",
+    "invoice": {
+      "name": "BTS-0002",
+      "docstatus": 0,
+      "grand_total": 1035.0,
+      "total_advance": 500.0,
+      "outstanding_amount": 0.0,
+      "items": [{ "item_code": "BT0023", "qty": 1.0, "sales_order": "SAL-ORD-2026-00012", "so_detail": "a1b2c3d4e5" }],
+      "payments": [{ "mode_of_payment": "CASH", "amount": 535.0 }]
+    }
+  }
+}
+```
+
+The customer on the invoice (`customercode`) must be the order's customer.
 
 ### Examples
 
@@ -286,6 +352,12 @@ Response `200`:
 | 417 | `Order already exists with Customer Order No: ...` |
 | 417 | `Reupload: No draft invoice found with GUID: ...` |
 | 417 | `Payment amount 99999.0 exceeds Sales Order total 1035.0` |
+| 404 | `Sales Order X not found` (`soName` unknown) |
+| 417 | `Sales Order X is not submitted` (draft or cancelled order in `soName`) |
+| 417 | `Sales Order X belongs to customer A, not B` |
+| 417 | `Sales Order X is already fully billed or closed` |
+| 417 | `No invoice item matches an unbilled item of Sales Order X` |
+| 417 | `POS Profile X has no mode of payment` (order fully prepaid, no payment lines, profile has no modes) |
 | 409 | `Another request changed the same records at the same time. Please retry.` |
 
 ---
@@ -333,7 +405,7 @@ Nothing is cancelled when any of these apply:
 | 417 | `Send one of: sales_order, guid, customerOrdernumber` | Add an identifier |
 | 417 | `Sales Order X is already cancelled` | Nothing; it is already done |
 | 417 | `Sales Order X is a draft and cannot be cancelled` | – |
-| 417 | `Cannot cancel Sales Order X; cancel these first: Sales Invoice ..., Delivery Note ...` | Cancel the invoice or delivery made from the order first |
+| 417 | `Cannot cancel Sales Order X; cancel these first: Sales Invoice ..., Delivery Note ...` | The order has already been billed (an invoice sent with its `soName` was submitted) or delivered. Cancel or return those first. |
 | 417 | `Payment Entry X is also allocated to ...; cancel it manually` | That payment also covers other documents; an accountant must handle it |
 
 ---
@@ -548,12 +620,13 @@ bench --site <site> set-config allow_tests true
 bench --site <site> set-config --parse stringerp_test '{
   "customer": "<customer name>", "customer_code": "<its customer code>",
   "item": "<item code with stock>", "mode_of_payment": "<mode>",
-  "mode_of_payment_2": "<second mode>", "company": "<company>"
+  "mode_of_payment_2": "<second mode>", "company": "<company>",
+  "pos_profile": "<POS profile of that company>"
 }'
 bench --site <site> run-tests --module stringerp.v1.test_api
 ```
 
-The order-flow tests skip themselves when `stringerp_test` is not set. Each test is rolled back, so no data is left behind.
+The order-flow and invoice-flow tests skip themselves when `stringerp_test` is not set. Each test is rolled back, so no data is left behind.
 
 ---
 
@@ -563,3 +636,5 @@ The order-flow tests skip themselves when `stringerp_test` is not set. Each test
 2. **Debit notes** have no `return_against` and no duplicate check of their own.
 3. **Invoice line discounts:** `discount_percentage` is calculated from `UnitPrice` but applied to `rate`. When the two differ, the discount is applied to a different price than the one it was worked out from.
 4. **Refund accounting** (see the note under `refund_sales_order`).
+5. **Invoice from an order keeps the POS rates and taxes.** They are taken from the invoice payload, not copied from the order. If "Maintain Same Rate Throughout Sales Cycle" is on in Selling Settings, a different rate is rejected.
+6. **POS advances are reconciled by this app.** ERPNext itself only reconciles advances on non-POS invoices; the app's Sales Invoice `on_submit` hook (`stringerp.doc_events.sales_invoice.on_submit`) does it for POS invoices.
