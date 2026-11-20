@@ -135,7 +135,8 @@ app_license = "agpl-3.0"
 doc_events = {
 	"Sales Invoice": {
 		"autoname": "stringerp.doc_events.sales_invoice.autoname",
-		"validate": "stringerp.doc_events.sales_invoice.validate"
+		"validate": "stringerp.doc_events.sales_invoice.validate",
+		"on_submit": "stringerp.doc_events.sales_invoice.on_submit",
 
 	}
 }

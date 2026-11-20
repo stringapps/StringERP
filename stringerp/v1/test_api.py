@@ -18,6 +18,7 @@ Every test runs in a transaction that is rolled back afterwards.
 """
 
 import unittest
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -264,3 +265,117 @@ class TestSalesOrderFlow(FrappeTestCase):
 		r = api.refund_sales_order(sales_order=so, refund_amount=200)
 		self.assertEqual(r["status"], "error")
 		self.assertIn("exceeds refundable amount 100", r["message"])
+
+
+class TestInvoiceFlow(TestSalesOrderFlow):
+	"""Independent invoice, and Sales Order -> Sales Invoice linking via soName."""
+
+	# don't re-run the inherited order tests
+	for _name in [n for n in dir(TestSalesOrderFlow) if n.startswith("test_")]:
+		locals()[_name] = None
+	del _name
+
+	def invoice(self, so_name=None, qty=1, payments=None):
+		kw = dict(self.order(), ordertype="Invoice", billDate=now()[:19], ispaid=1 if payments else 0)
+		kw["items"] = [{"barcode": self.cfg.item, "quantity": qty, "UnitPrice": 1000, "rate": 1000}]
+		kw["payments"] = payments or []
+		if so_name:
+			kw["soName"] = so_name
+		return kw
+
+	def create_invoice(self, **kw):
+		r = api.create_siv(**self.invoice(**kw))
+		self.assertEqual(r["status"], "success", r.get("message"))
+		return frappe.get_doc("Sales Invoice", r["invoice"].name)
+
+	def test_independent_invoice(self):
+		si = self.create_invoice()
+		self.assertTrue(all(not i.sales_order and not i.so_detail for i in si.items))
+		self.assertFalse(si.advances)
+
+	def test_invoice_linked_to_unpaid_order(self):
+		so = self.create()["order"]
+		si = self.create_invoice(so_name=so.name)
+		self.assertEqual(si.items[0].sales_order, so.name)
+		self.assertEqual(si.items[0].so_detail, so.items[0].name)
+		self.assertFalse(si.advances)
+
+	def test_invoice_pulls_partial_advance(self):
+		so = self.create(payments=[{"CARDTYPE": self.cfg.mode_of_payment, "AMOUNT": 500}])["order"]
+		si = self.create_invoice(so_name=so.name)
+		self.assertEqual(len(si.advances), 1)
+		self.assertEqual(si.advances[0].allocated_amount, 500)
+		self.assertEqual(flt(si.total_advance), 500)
+		self.assertEqual(flt(si.outstanding_amount), flt(si.grand_total) - 500)
+
+	def submit_paying_balance(self, si):
+		"""Pay the POS balance and submit. ZATCA signing is stubbed: the CLI isn't installed locally."""
+		balance = flt(si.grand_total) - flt(si.total_advance)
+		if balance > 0:
+			si.append("payments", {"mode_of_payment": self.cfg.mode_of_payment, "amount": balance})
+			si.save()
+		with patch(
+			"ksa_compliance.standard_doctypes.sales_invoice.create_sales_invoice_additional_fields_doctype"
+		):
+			si.submit()
+		return si
+
+	def test_invoice_pulls_full_advance_and_bills_order(self):
+		so = self.create(ispaid=1)["order"]
+		si = self.create_invoice(so_name=so.name)
+		self.assertEqual(flt(si.total_advance), flt(so.grand_total))
+		self.assertEqual(flt(si.outstanding_amount), flt(si.grand_total) - flt(so.grand_total))
+		self.submit_paying_balance(si)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", si.name, "outstanding_amount")), 0)
+		self.assertEqual(frappe.db.get_value("Sales Order", so.name, "per_billed"), 100)
+		# a fully billed order can't be invoiced again, nor cancelled
+		r = api.create_siv(**self.invoice(so_name=so.name))
+		self.assertEqual(r["status"], "error")
+		self.assertIn("fully billed", r["message"])
+		self.assertIn("cancel these first", api.cancel_sales_order(sales_order=so.name)["message"])
+
+	def test_partial_billing_of_order(self):
+		kw = self.order(payments=[{"CARDTYPE": self.cfg.mode_of_payment, "AMOUNT": 500}])
+		kw["items"][0]["quantity"] = 2
+		so = api.create_siv(**kw)["order"]
+		so_doc = frappe.get_doc("Sales Order", so.name)
+		si = self.submit_paying_balance(self.create_invoice(so_name=so.name, qty=1))
+		self.assertEqual(si.items[0].so_detail, so_doc.items[0].name)
+		self.assertEqual(frappe.db.get_value("Sales Order", so.name, "per_billed"), 50)
+		# second invoice bills the remaining qty; a third has nothing left to link
+		si2 = self.create_invoice(so_name=so.name, qty=1)
+		self.assertEqual(si2.items[0].so_detail, so_doc.items[0].name)
+		r = api.create_siv(**self.invoice(so_name=so.name, qty=1))
+		self.assertEqual(r["status"], "error")
+		self.assertIn("No invoice item matches", r["message"])
+
+	def test_partial_advance_plus_pos_balance(self):
+		so = self.create(payments=[{"CARDTYPE": self.cfg.mode_of_payment, "AMOUNT": 500}])["order"]
+		pe = frappe.db.get_value("Payment Entry Reference", {"reference_name": so.name}, "parent")
+		si = self.submit_paying_balance(self.create_invoice(so_name=so.name))
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", si.name, "outstanding_amount")), 0)
+		self.assertEqual(frappe.db.get_value("Sales Order", so.name, "per_billed"), 100)
+		self.assertEqual(
+			frappe.db.get_value("Payment Entry Reference", {"parent": pe}, "reference_name"), si.name
+		)
+
+	def test_unknown_so_name(self):
+		r = api.create_siv(**self.invoice(so_name="SO-DOES-NOT-EXIST"))
+		self.assertEqual(r["status"], "error")
+		self.assertEqual(frappe.local.response.http_status_code, 404)
+
+	def test_cancelled_so_rejected(self):
+		so = self.create()["order"].name
+		api.cancel_sales_order(sales_order=so)
+		r = api.create_siv(**self.invoice(so_name=so))
+		self.assertEqual(r["status"], "error")
+		self.assertIn("not submitted", r["message"])
+
+	def test_item_not_on_order_rejected(self):
+		so = self.create()["order"].name
+		kw = self.invoice(so_name=so)
+		other = frappe.db.get_value("Item", {"name": ["!=", self.cfg.item], "is_stock_item": 1, "disabled": 0}, "name")
+		kw["items"] = [{"barcode": other, "quantity": 1, "UnitPrice": 10, "rate": 10}]
+		r = api.create_siv(**kw)
+		self.assertEqual(r["status"], "error")
+		self.assertIn("No invoice item matches", r["message"])

@@ -341,6 +341,35 @@ Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
 }
 
 
+### Create Sales Invoice for an existing Sales Order (soName)
+### Links items to the order and applies its advance payments; send only the balance in payments[].
+### Omit soName for an independent invoice.
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.create_siv
+Content-Type: application/json
+Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+
+{
+  "ordertype": "Invoice",
+  "soName": "SAL-ORD-2026-00012",
+  "guid": "INV-SO-TEST-0001",
+  "customerOrdernumber": "BTS-INV-SO-0001",
+  "customercode": "Walkin Customer",
+  "salesmancode": "",
+  "posProfile": "TAWOOK-SEEF",
+  "CRTime": "2026-11-15 10:00:00",
+  "billDate": "2026-11-15 10:00:00",
+  "ispaid": 1,
+  "Reupload": 0,
+  "items": [
+    { "barcode": "BT0023", "quantity": 10, "UnitPrice": 100, "rate": 100, "UnitDisc": 0, "DiscTID": "DINE IN" }
+  ],
+  "payments": [
+    { "CARDTYPE": "CASH", "CARDNO": "", "AMOUNT": 650 }
+  ],
+  "deliveryCharges": []
+}
+
+
 ### Cancel Sales Order (also cancels its linked Payment Entries)
 ### Send ONE of: sales_order | guid | customerOrdernumber
 POST http://127.0.0.1:8002/api/method/stringerp.v1.api.cancel_sales_order
