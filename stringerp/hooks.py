@@ -288,7 +288,8 @@ fixtures = [
                     "Sales Invoice Item-custom_discount_rate",
                     "Sales Order Item-custom_discount_type",
                     "Sales Order Item-custom_discount_rate",
-                    "Payment Entry-custom_refund_against_sales_order"
+                    "Payment Entry-custom_refund_against_sales_order",
+                    "Payment Entry-custom_guid"
                 ],
             ],
         ],   

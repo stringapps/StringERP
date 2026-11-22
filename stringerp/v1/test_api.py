@@ -236,6 +236,62 @@ class TestSalesOrderFlow(FrappeTestCase):
 		self.assertEqual(r["status"], "error")
 		self.assertIn("Sales Person NO-SUCH-SALESMAN is missing", r["message"])
 
+	def test_add_payment_to_unpaid_order(self):
+		so = self.create()["order"].name
+		mop = self.cfg.mode_of_payment
+		r = api.add_sales_order_payment(
+			sales_order=so, payments=[{"CARDTYPE": mop, "AMOUNT": 400, "CARDNO": "TX1"}]
+		)
+		self.assertEqual(r["status"], "success", r.get("message"))
+		self.assertEqual(r["paid_amount"], 400)
+		self.assertEqual(r["outstanding_amount"], r["grand_total"] - 400)
+		self.assertEqual(r["payments"][0]["reference_no"], "TX1")
+		self.assertEqual(frappe.db.get_value("Sales Order", so, "advance_paid"), 400)
+
+	def test_add_split_payment_after_advance(self):
+		kw = self.order(payments=[{"CARDTYPE": self.cfg.mode_of_payment, "AMOUNT": 200}])
+		total = api.create_siv(**kw)["order"].grand_total
+		modes = (self.cfg.mode_of_payment, self.cfg.mode_of_payment_2 or self.cfg.mode_of_payment)
+		r = api.add_sales_order_payment(
+			guid=kw["guid"], payments=[{"CARDTYPE": modes[0], "AMOUNT": 300}, {"CARDTYPE": modes[1], "AMOUNT": total - 500}]
+		)
+		self.assertEqual(r["status"], "success", r.get("message"))
+		self.assertEqual(len(r["payments"]), 2)
+		self.assertEqual((r["paid_amount"], r["outstanding_amount"]), (total, 0))
+
+	def test_add_payment_over_balance_rolls_back(self):
+		order = self.create(payments=[{"CARDTYPE": self.cfg.mode_of_payment, "AMOUNT": 700}])["order"]
+		so, balance = order.name, order.grand_total - 700
+		r = api.add_sales_order_payment(
+			sales_order=so,
+			payments=[{"CARDTYPE": self.cfg.mode_of_payment, "AMOUNT": balance - 100}, {"AMOUNT": 200}],
+		)
+		self.assertEqual(r["status"], "error")
+		self.assertIn(f"exceeds the balance {balance}", r["message"])
+		self.assertEqual(frappe.db.get_value("Sales Order", so, "advance_paid"), 700)
+
+	def test_add_payment_retry_is_idempotent(self):
+		so = self.create()["order"].name
+		kw = dict(sales_order=so, payment_guid="PAY-" + random_string(10), payments=[{"AMOUNT": 250}])
+		first = api.add_sales_order_payment(**kw)
+		self.assertEqual(first["status"], "success", first.get("message"))
+		second = api.add_sales_order_payment(**kw)
+		self.assertTrue(second["duplicate"])
+		self.assertEqual(second["payments"][0]["name"], first["payments"][0]["name"])
+		self.assertEqual(second["paid_amount"], 250)
+
+	def test_add_payment_validation(self):
+		so = self.create()["order"].name
+		r = api.add_sales_order_payment(sales_order=so, payments=[])
+		self.assertIn("payments is required", r["message"])
+		r = api.add_sales_order_payment(sales_order=so, payments=[{"AMOUNT": 0}])
+		self.assertIn("greater than 0", r["message"])
+		r = api.add_sales_order_payment(sales_order=so, payments=[{"AMOUNT": 10, "CARDTYPE": "NO-SUCH-MODE"}])
+		self.assertEqual(frappe.local.response.http_status_code, 404)
+		self.assertEqual(api.cancel_sales_order(sales_order=so)["status"], "success")
+		r = api.add_sales_order_payment(sales_order=so, payments=[{"AMOUNT": 10}])
+		self.assertIn("is not submitted", r["message"])
+
 	def test_cancel_and_refund(self):
 		so = self.create(payments=[{"CARDTYPE": self.cfg.mode_of_payment, "AMOUNT": 500}])["order"].name
 

@@ -2,15 +2,16 @@
 
 Source: [`stringerp/v1/api.py`](../stringerp/v1/api.py) · Tests: [`stringerp/v1/test_api.py`](../stringerp/v1/test_api.py) · Ready-made requests: [`stringerp/v1/api-test.http`](../stringerp/v1/api-test.http)
 
-This API connects the external POS to ERPNext. The POS sends invoices and orders, takes advance payments, cancels orders, pays refunds, and closes the day.
+This API connects the external POS to ERPNext. The POS sends invoices and orders, takes advance payments (at order time or later), cancels orders, pays refunds, and closes the day.
 
 | # | Endpoint | What it does |
 |---|---|---|
 | 1 | [`create_siv`](#1-create_siv--sales-invoice-debit-note-sales-order) | Creates a Sales Invoice, Debit Note or Sales Order (with advance payments) |
-| 2 | [`cancel_sales_order`](#2-cancel_sales_order) | Cancels a Sales Order and all of its payments |
-| 3 | [`refund_sales_order`](#3-refund_sales_order) | Pays money back to the customer of a cancelled Sales Order |
-| 4 | [`create_invoice_closing`](#4-create_invoice_closing) | Day-end closing for a POS profile: collects and submits the day's invoices |
-| 5 | [`get_customer_details`](#5-get_customer_details) | Reads one customer |
+| 2 | [`add_sales_order_payment`](#2-add_sales_order_payment) | Records a later (part / split) payment against an existing Sales Order |
+| 3 | [`cancel_sales_order`](#3-cancel_sales_order) | Cancels a Sales Order and all of its payments |
+| 4 | [`refund_sales_order`](#4-refund_sales_order) | Pays money back to the customer of a cancelled Sales Order |
+| 5 | [`create_invoice_closing`](#5-create_invoice_closing) | Day-end closing for a POS profile: collects and submits the day's invoices |
+| 6 | [`get_customer_details`](#6-get_customer_details) | Reads one customer |
 
 ---
 
@@ -169,6 +170,8 @@ Each payment line becomes **its own Payment Entry** against the order.
 | One line **less** than the total (e.g. 500 of 1035) | **Partial advance**. `outstanding_amount` is the rest. |
 | Several lines (e.g. 300 CASH + 200 VISA) | One Payment Entry per line, each into its own account |
 | Lines adding up to more than the total | Rejected (417); nothing is created |
+
+To take **more money later** (another part payment, in any mix of modes), use [`add_sales_order_payment`](#2-add_sales_order_payment). It works whether or not an advance was paid at order time.
 
 ```mermaid
 flowchart LR
@@ -362,7 +365,104 @@ Response `200`:
 
 ---
 
-## 2. `cancel_sales_order`
+## 2. `add_sales_order_payment`
+
+Records a **later payment** against a Sales Order that already exists: the customer ordered with or without an advance and now pays part (or all) of the balance, possibly split across several payment modes.
+
+Each payment line becomes **its own submitted Payment Entry** (type **Receive**) allocated to the order, exactly like the advances taken by `create_siv`. ERPNext updates the order's **Advance Paid**, and when the order is invoiced (with `soName`) these payments are applied to the invoice as advances.
+
+```mermaid
+sequenceDiagram
+    participant POS
+    participant API
+    POS->>API: create_siv (Order 2300, paid 500 or nothing)
+    API-->>POS: order.name, outstanding_amount
+    POS->>API: add_sales_order_payment (CARD 800 + CASH 200)
+    API-->>POS: 2 Payment Entries, outstanding 800
+    POS->>API: create_siv (Invoice, soName, payments = balance 800)
+    API-->>POS: Draft invoice, all advances applied
+```
+
+### Request
+
+| Key | Required | Description |
+|---|---|---|
+| `sales_order` / `guid` / `customerOrdernumber` | ✅ (one of) | The order to pay. `guid` / `customerOrdernumber` are the values sent when the order was created. |
+| `payments` | ✅ | List of payment lines, same format as in `create_siv`. |
+| `payments[].AMOUNT` | ✅ | Amount of this line. Must be more than 0. |
+| `payments[].CARDTYPE` | Optional | Mode of Payment (e.g. `CASH`, `VISA`). The money goes to its default account for the company. If left out, ERPNext's default receiving account is used. |
+| `payments[].CARDNO` | Optional | Card / cheque / transaction number, stored as the Payment Entry's reference no. Default: the order name. |
+| `payment_guid` | Recommended | Unique id of this POS payment. If the same `payment_guid` is sent again (for example after a timeout), **nothing new is created**: the original entries are returned with `duplicate: true`. Stored on the Payment Entry as **GUID** (`custom_guid`). |
+| `posting_date` | Optional | `YYYY-MM-DD` (a datetime is accepted; only the date is used). Default: today. |
+
+```json
+{
+  "customerOrdernumber": "BTS-SO-0001",
+  "payment_guid": "BTS-PAY-0002",
+  "posting_date": "2026-11-22",
+  "payments": [
+    { "CARDTYPE": "CARD", "AMOUNT": 800, "CARDNO": "TXN-555" },
+    { "CARDTYPE": "CASH", "AMOUNT": 200, "CARDNO": "" }
+  ]
+}
+```
+
+**Limit:** all payments on the order together (the advance at creation + every later payment) can never exceed the order's grand total (VAT included). The call can be repeated as many times as needed until the order is fully paid.
+
+### Response `200`
+
+```json
+{
+  "message": {
+    "status": "success",
+    "message": "1000.0 received against Sales Order SAL-ORD-2026-02929",
+    "duplicate": false,
+    "sales_order": "SAL-ORD-2026-02929",
+    "payments": [
+      { "name": "ACC-PAY-2026-11533", "paid_amount": 800.0, "mode_of_payment": "CARD", "reference_no": "TXN-555" },
+      { "name": "ACC-PAY-2026-11534", "paid_amount": 200.0, "mode_of_payment": "CASH", "reference_no": "SAL-ORD-2026-02929" }
+    ],
+    "grand_total": 2300.0,
+    "paid_amount": 1500.0,
+    "outstanding_amount": 800.0
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `payments` | The Payment Entries created by **this** call (on a retry: the ones created the first time) |
+| `paid_amount` | Total paid on the order so far, including the advance taken at creation |
+| `outstanding_amount` | What the customer still owes on the order (`grand_total − paid_amount`). Send this as `payments[]` when invoicing with `soName`. |
+| `duplicate` | `true` when `payment_guid` was already recorded and nothing new was created |
+
+### Rules
+
+- **All or nothing.** If any line fails, no Payment Entry from the call is saved.
+- **No overpayment, even under load.** The order is locked while the payment is checked and saved, so two payments sent at the same moment cannot together go over the total.
+- **Partly billed orders** can still take payments. **Fully billed**, closed, completed or on-hold orders cannot; take the payment against the invoice instead.
+- Payments added here are cancelled by [`cancel_sales_order`](#3-cancel_sales_order) together with the order's other payments, and count towards [`refund_sales_order`](#4-refund_sales_order).
+
+### When it refuses
+
+Nothing is created when any of these apply:
+
+| HTTP | `message` |
+|---|---|
+| 404 | `Sales Order X not found` / `No Sales Order found with customerOrdernumber: X` |
+| 404 | `Mode of Payment X not found` |
+| 417 | `Send one of: sales_order, guid, customerOrdernumber` |
+| 417 | `payments is required` |
+| 417 | `Each payment AMOUNT must be greater than 0` |
+| 417 | `Sales Order X is not submitted` (draft or cancelled) |
+| 417 | `Sales Order X is Completed; payments are not allowed` (also `Closed`, `On Hold`) |
+| 417 | `Sales Order X is fully billed; record the payment against its invoice` |
+| 417 | `Payment 900.0 exceeds the balance 800.0 of Sales Order X (total 2300.0, already paid 1500.0)` |
+| 409 | `Another request changed the same records at the same time. Please retry.` |
+
+---
+
+## 3. `cancel_sales_order`
 
 Cancels a submitted Sales Order and **every** Payment Entry received against it, in one step.
 
@@ -410,7 +510,7 @@ Nothing is cancelled when any of these apply:
 
 ---
 
-## 3. `refund_sales_order`
+## 4. `refund_sales_order`
 
 Pays money back to the customer of a **cancelled** Sales Order. Use it when the refund is less than what was paid, for example a cancellation fee is kept.
 
@@ -486,7 +586,7 @@ The refund Payment Entry stores the order in **Refund Against Sales Order** (`cu
 
 ---
 
-## 4. `create_invoice_closing`
+## 5. `create_invoice_closing`
 
 Day-end closing for one POS profile. It collects that day's draft invoices and, when `is_submit = 1`, creates and submits the stock entries and submits the invoices.
 
@@ -564,7 +664,7 @@ sequenceDiagram
 
 ---
 
-## 5. `get_customer_details`
+## 6. `get_customer_details`
 
 ```
 GET /api/method/stringerp.v1.api.get_customer_details?customer_id=Walkin%20Customer
@@ -605,11 +705,11 @@ The API looks these up and rejects the request if they are missing:
 | Customer with **Customer Code** (`custom_customer_code`) | Customer | `customercode` |
 | Sales Person with **Sales Person Code** (`custom_sales_person_code`) | Sales Person | `salesmancode` |
 | Item for each `barcode` | Item | `items[]`, `deliveryCharges[]` |
-| Mode of Payment for each `CARDTYPE`, with a default account for the company | Mode of Payment | `payments[]`, refunds |
+| Mode of Payment for each `CARDTYPE`, with a default account for the company | Mode of Payment | `payments[]`, later payments, refunds |
 | Every `DiscTID` value (e.g. `DINE IN`, `ENTERTAINER`) | Discount Type | `items[].DiscTID` |
 | POS Profile with its payment modes | POS Profile | `posProfile`, Invoice Closing |
 
-The app's custom fields (guid, customer order no, walk-in fields, refund link, …) come from `fixtures/custom_field.json` and are installed by `bench migrate`.
+The app's custom fields (guid, customer order no, walk-in fields, refund link, payment GUID, …) come from `fixtures/custom_field.json` and are installed by `bench migrate`.
 
 ---
 
