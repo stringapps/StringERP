@@ -4,6 +4,7 @@ Endpoints (all POST, token auth):
 	create_siv              - Sales Invoice / Debit Note / Sales Order (+ advance payments);
 	                          an invoice with "soName" is linked to that Sales Order
 	cancel_sales_order      - cancel a Sales Order and its Payment Entries
+	add_sales_order_payment - record a later (part / split) payment against a Sales Order
 	refund_sales_order      - pay a refund to the customer of a cancelled Sales Order
 	create_invoice_closing  - create / submit an Invoice Closing for a POS Profile and date
 	get_customer_details    - read a Customer
@@ -459,30 +460,36 @@ def create_sales_order_payments(so_doc, kwargs):
 			_("Payment amount {0} exceeds Sales Order total {1}").format(total_requested, so_doc.grand_total)
 		)
 
-	created = []
-	for pay in payment_lines:
-		amount = flt(pay.get("AMOUNT"))
-		pe_doc = get_payment_entry(dt="Sales Order", dn=so_doc.name, party_amount=amount)
+	return [
+		_create_order_payment(so_doc, flt(pay.get("AMOUNT")), pay.get("CARDTYPE"), pay.get("CARDNO")).as_dict()
+		for pay in payment_lines
+	]
 
-		mode_of_payment = pay.get("CARDTYPE")
-		if mode_of_payment:
-			pe_doc.mode_of_payment = mode_of_payment
-			account = get_bank_cash_account(mode_of_payment, so_doc.company).get("account")
-			if account:
-				pe_doc.paid_to = account
 
-		pe_doc.paid_amount = amount
-		pe_doc.received_amount = amount
-		for ref in pe_doc.references:
-			ref.allocated_amount = amount
+def _create_order_payment(so_doc, amount, mode_of_payment=None, reference_no=None, guid=None, posting_date=None):
+	"""Submit one 'Receive' Payment Entry of `amount` allocated to the Sales Order as an advance."""
+	pe_doc = get_payment_entry(dt="Sales Order", dn=so_doc.name, party_amount=amount)
 
-		pe_doc.reference_no = pay.get("CARDNO") or so_doc.name
-		pe_doc.reference_date = so_doc.transaction_date
-		pe_doc.insert()
-		pe_doc.submit()
-		created.append(pe_doc.as_dict())
+	if mode_of_payment:
+		pe_doc.mode_of_payment = mode_of_payment
+		account = get_bank_cash_account(mode_of_payment, so_doc.company).get("account")
+		if account:
+			pe_doc.paid_to = account
 
-	return created
+	pe_doc.paid_amount = amount
+	pe_doc.received_amount = amount
+	for ref in pe_doc.references:
+		ref.allocated_amount = amount
+
+	if posting_date:
+		pe_doc.posting_date = posting_date
+	pe_doc.reference_no = reference_no or so_doc.name
+	pe_doc.reference_date = posting_date or so_doc.transaction_date
+	if guid:
+		pe_doc.custom_guid = guid
+	pe_doc.insert()
+	pe_doc.submit()
+	return pe_doc
 
 
 def map_external_to_sales_order(external_data):
@@ -849,6 +856,154 @@ def refund_sales_order(**kwargs):
 
 	except Exception as e:
 		return _fail("Refund Sales Order", kwargs, e)
+
+
+# ---------------------------------------------------------------------------
+# Additional payments against an existing Sales Order
+# ---------------------------------------------------------------------------
+
+
+def _order_paid_amount(so_name):
+	"""Submitted advance payments allocated to the order (locking read, see _refunded_on_order)."""
+	result = frappe.db.sql(
+		"""
+		select sum(r.allocated_amount)
+		from `tabPayment Entry Reference` r
+		join `tabPayment Entry` pe on pe.name = r.parent
+		where pe.docstatus = 1
+			and pe.payment_type = 'Receive'
+			and r.reference_doctype = 'Sales Order'
+			and r.reference_name = %s
+		for update
+		""",
+		so_name,
+	)
+	return flt(result[0][0])
+
+
+@frappe.whitelist(allow_guest=False)
+def add_sales_order_payment(**kwargs):
+	"""Record a later (part) payment against an existing, submitted Sales Order.
+
+	Use when the customer pays again after the order was created, with or without an
+	advance at creation. Each payments[] line becomes its own Payment Entry, so one call
+	can take a split payment (e.g. 300 cash + 200 card).
+
+	Identify the order with one of: sales_order, guid, customerOrdernumber.
+	Other parameters:
+		payments     (list, required) - [{"AMOUNT", "CARDTYPE" (mode of payment), "CARDNO"}]
+		payment_guid (str, optional)  - unique id of this POS payment; a retry with the same
+		                                id returns the original entries instead of paying twice
+		posting_date (str, optional)  - default: today
+
+	The total of all payments on the order may not exceed its grand total. The order must
+	be submitted, not closed and not fully billed (pay a billed order against its invoice).
+	All lines are created in one transaction: if any fails, none is saved.
+	"""
+	kwargs = _parse_payload(kwargs)
+	try:
+		frappe.db.savepoint(SAVEPOINT)
+		so_name = _find_sales_order(kwargs)
+		# Held until commit: concurrent payments for the same order run one after another,
+		# so the balance check below always sees the earlier ones.
+		_lock("Sales Order", so_name)
+		so = frappe.get_doc("Sales Order", so_name)
+
+		payment_guid = kwargs.get("payment_guid")
+		if payment_guid:
+			existing = frappe.get_all(
+				"Payment Entry",
+				filters={"custom_guid": payment_guid, "docstatus": 1},
+				fields=["name", "paid_amount", "mode_of_payment", "reference_no"],
+				order_by="creation asc",
+			)
+			if existing:
+				return {
+					"status": "success",
+					"message": _("Payment {0} already recorded").format(payment_guid),
+					"duplicate": True,
+					"sales_order": so.name,
+					"payments": existing,
+					**_order_balance(so),
+				}
+
+		if so.docstatus != 1:
+			raise frappe.ValidationError(_("Sales Order {0} is not submitted").format(so.name))
+		if so.status in ("Closed", "Completed", "On Hold"):
+			raise frappe.ValidationError(
+				_("Sales Order {0} is {1}; payments are not allowed").format(so.name, so.status)
+			)
+		if flt(so.per_billed) >= 100:
+			raise frappe.ValidationError(
+				_("Sales Order {0} is fully billed; record the payment against its invoice").format(so.name)
+			)
+
+		lines = kwargs.get("payments") or []
+		if isinstance(lines, str):
+			lines = frappe.parse_json(lines)
+		if not lines:
+			raise frappe.ValidationError(_("payments is required"))
+		for line in lines:
+			if flt(line.get("AMOUNT")) <= 0:
+				raise frappe.ValidationError(_("Each payment AMOUNT must be greater than 0"))
+			mode = line.get("CARDTYPE")
+			if mode and not frappe.db.exists("Mode of Payment", mode):
+				raise frappe.DoesNotExistError(_("Mode of Payment {0} not found").format(mode))
+
+		requested = sum(flt(line.get("AMOUNT")) for line in lines)
+		already_paid = _order_paid_amount(so.name)
+		balance = flt(so.grand_total) - already_paid
+		if flt(requested, 2) > flt(balance, 2):
+			raise frappe.ValidationError(
+				_("Payment {0} exceeds the balance {1} of Sales Order {2} (total {3}, already paid {4})").format(
+					requested, balance, so.name, so.grand_total, already_paid
+				)
+			)
+
+		posting_date = _date_part(kwargs.get("posting_date")) or today()
+		created = [
+			_create_order_payment(
+				so,
+				flt(line.get("AMOUNT")),
+				mode_of_payment=line.get("CARDTYPE"),
+				reference_no=line.get("CARDNO"),
+				guid=payment_guid,
+				posting_date=posting_date,
+			)
+			for line in lines
+		]
+
+		so.reload()
+		response = {
+			"status": "success",
+			"message": _("{0} received against Sales Order {1}").format(requested, so.name),
+			"duplicate": False,
+			"sales_order": so.name,
+			"payments": [
+				{
+					"name": pe.name,
+					"paid_amount": pe.paid_amount,
+					"mode_of_payment": pe.mode_of_payment,
+					"reference_no": pe.reference_no,
+				}
+				for pe in created
+			],
+			**_order_balance(so),
+		}
+		api_log(api="Add Sales Order Payment", data=kwargs, response=response, status="Success")
+		return response
+
+	except Exception as e:
+		return _fail("Add Sales Order Payment", kwargs, e)
+
+
+def _order_balance(so):
+	paid = _order_paid_amount(so.name)
+	return {
+		"grand_total": flt(so.grand_total),
+		"paid_amount": paid,
+		"outstanding_amount": flt(so.grand_total) - paid,
+	}
 
 
 # ---------------------------------------------------------------------------

@@ -381,6 +381,26 @@ Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
 }
 
 
+### Add a later (part / split) payment to an existing Sales Order
+### Send ONE of: sales_order | guid | customerOrdernumber
+### payments[]: one Payment Entry per line (CARDTYPE = mode of payment, CARDNO = reference no)
+### payment_guid: optional, unique per POS payment; retrying it returns the original entries (duplicate=true)
+### Total paid on the order can never exceed its grand total
+POST http://127.0.0.1:8002/api/method/stringerp.v1.api.add_sales_order_payment
+Content-Type: application/json
+Authorization: token 1b5308bc9d3b9cd:92bcf1657e90fce
+
+{
+  "customerOrdernumber": "BTS-SO-0001",
+  "payment_guid": "BTS-PAY-0002",
+  "posting_date": "2026-11-22",
+  "payments": [
+    { "CARDTYPE": "CASH", "AMOUNT": 200, "CARDNO": "" },
+    { "CARDTYPE": "CARD", "AMOUNT": 300, "CARDNO": "TXN-88231" }
+  ]
+}
+
+
 ### Refund a cancelled Sales Order (new "Pay" Payment Entry to the customer)
 ### Send ONE of: sales_order | guid | customerOrdernumber
 ### refund_amount: required, > 0, max = amount paid on the order minus earlier refunds
